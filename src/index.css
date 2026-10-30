@@ -1,0 +1,49 @@
+@import 'tailwindcss';
+
+/*
+ * Tokens de marca de AD Clinic.
+ * Se exponen como utilidades de Tailwind: bg-brand-600, text-brand-700, etc.
+ */
+@theme {
+  --color-brand-50: #ecfeff;
+  --color-brand-100: #cffafe;
+  --color-brand-200: #a5f3fc;
+  --color-brand-300: #67e8f9;
+  --color-brand-400: #22d3ee;
+  --color-brand-500: #06b6d4;
+  --color-brand-600: #0891b2;
+  --color-brand-700: #0e7490;
+  --color-brand-800: #155e75;
+  --color-brand-900: #0c4a6e;
+  --color-brand-950: #082f49;
+
+  --font-sans: system-ui, 'Segoe UI', Roboto, sans-serif;
+}
+
+@layer base {
+  html {
+    color-scheme: light;
+  }
+
+  body {
+    margin: 0;
+    min-height: 100svh;
+    background-color: #f8fafc;
+    color: #1e293b;
+    font-family: var(--font-sans);
+    font-synthesis: none;
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  #root {
+    min-height: 100svh;
+  }
+
+  /* Foco visible y consistente en toda la app (accesibilidad con teclado). */
+  :focus-visible {
+    outline: 2px solid #0891b2;
+    outline-offset: 2px;
+  }
+}

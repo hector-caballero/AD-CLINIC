@@ -1,0 +1,107 @@
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import type { Session } from '@supabase/supabase-js'
+import { supabase } from '../../lib/supabase'
+import { AuthContext, type AuthContextValue, type SignInResult } from './AuthContext'
+import { getAuthErrorMessage } from './auth-errors'
+
+type AuthProviderProps = {
+  children: ReactNode
+}
+
+/**
+ * Mantiene el estado de sesión de Supabase Auth y lo expone vía `useAuth()`.
+ *
+ * Fuentes de verdad:
+ *  1. `getSession()` al montar: recupera la sesión persistida en el dispositivo.
+ *  2. `onAuthStateChange()`: login, logout, refresh de token y sesión caducada.
+ */
+export function AuthProvider({ children }: AuthProviderProps) {
+  const [session, setSession] = useState<Session | null>(null)
+  const [isLoading, setIsLoading] = useState(true)
+  const [isSigningIn, setIsSigningIn] = useState(false)
+  // Evita peticiones duplicadas si se pulsa "Entrar" dos veces seguidas.
+  const isSigningInRef = useRef(false)
+
+  useEffect(() => {
+    let isMounted = true
+
+    supabase.auth
+      .getSession()
+      .then(({ data, error }) => {
+        if (!isMounted) return
+
+        if (error) {
+          console.error('[AD Clinic] No se pudo recuperar la sesión:', error.message)
+        }
+
+        setSession(data.session)
+      })
+      .finally(() => {
+        if (isMounted) setIsLoading(false)
+      })
+
+    const { data: authListener } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+      if (!isMounted) return
+
+      setSession(nextSession)
+      setIsLoading(false)
+    })
+
+    return () => {
+      isMounted = false
+      authListener.subscription.unsubscribe()
+    }
+  }, [])
+
+  const signIn = useCallback(async (email: string, password: string): Promise<SignInResult> => {
+    if (isSigningInRef.current) return { error: null }
+
+    isSigningInRef.current = true
+    setIsSigningIn(true)
+
+    try {
+      const { error } = await supabase.auth.signInWithPassword({
+        email: email.trim(),
+        password,
+      })
+
+      return { error: error ? getAuthErrorMessage(error) : null }
+    } catch (error) {
+      return { error: getAuthErrorMessage(error) }
+    } finally {
+      isSigningInRef.current = false
+      setIsSigningIn(false)
+    }
+  }, [])
+
+  const signOut = useCallback(async () => {
+    try {
+      const { error } = await supabase.auth.signOut()
+
+      if (error) {
+        // Sin conexión (o token ya revocado en el servidor): cerramos al menos
+        // la sesión de este dispositivo para no dejar la PWA abierta.
+        await supabase.auth.signOut({ scope: 'local' })
+      }
+    } catch (error) {
+      console.error('[AD Clinic] Error al cerrar sesión:', error)
+    } finally {
+      setSession(null)
+    }
+  }, [])
+
+  const value = useMemo<AuthContextValue>(
+    () => ({
+      session,
+      user: session?.user ?? null,
+      isLoading,
+      isSigningIn,
+      isAuthenticated: session !== null,
+      signIn,
+      signOut,
+    }),
+    [session, isLoading, isSigningIn, signIn, signOut],
+  )
+
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
+}
