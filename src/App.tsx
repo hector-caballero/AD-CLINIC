@@ -1,6 +1,7 @@
 import { BrowserRouter, Route, Routes } from 'react-router-dom'
 import { AppLayout } from './components/layout/AppLayout'
 import { AuthProvider } from './features/auth/AuthProvider'
+import { RequireAdmin } from './features/auth/RequireAdmin'
 import { RequireAuth } from './features/auth/RequireAuth'
 import AppointmentsPage from './pages/AppointmentsPage'
 import CashPage from './pages/CashPage'
@@ -8,6 +9,7 @@ import DashboardPage from './pages/DashboardPage'
 import LoginPage from './pages/LoginPage'
 import NotFoundPage from './pages/NotFoundPage'
 import PatientsPage from './pages/PatientsPage'
+import TeamPage from './pages/TeamPage'
 import TreatmentsPage from './pages/TreatmentsPage'
 
 /**
@@ -31,6 +33,14 @@ export default function App() {
               <Route path="citas" element={<AppointmentsPage />} />
               <Route path="tratamientos" element={<TreatmentsPage />} />
               <Route path="caja" element={<CashPage />} />
+              <Route
+                path="equipo"
+                element={
+                  <RequireAdmin>
+                    <TeamPage />
+                  </RequireAdmin>
+                }
+              />
               <Route path="*" element={<NotFoundPage />} />
             </Route>
           </Route>

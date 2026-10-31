@@ -38,6 +38,31 @@ export function formatPYG(amount: number): string {
   return safe < 0 ? `-${PYG_SYMBOL} ${absolute}` : `${PYG_SYMBOL} ${absolute}`
 }
 
+/**
+ * Monto para un `<input>` en guaraníes: descarta lo que no sea dígito y agrupa
+ * los miles mientras se escribe (`1500000` → `1.500.000`). No incluye el
+ * símbolo `₲`, que se muestra como prefijo del campo.
+ *
+ * Se cortan los ceros a la izquierda y se limita a 10 dígitos porque
+ * `numeric(12, 2)` admite 10 enteros.
+ */
+export function formatPYGInput(value: string): string {
+  const digits = onlyDigits(value).replace(/^0+(?=\d)/, '').slice(0, 10)
+
+  return groupThousands(digits)
+}
+
+/** `1.500.000` → `1500000` (0 si el campo está vacío o no tiene dígitos). */
+export function parsePYGInput(value: string): number {
+  const digits = onlyDigits(value)
+
+  if (!digits) return 0
+
+  const amount = Number(digits)
+
+  return Number.isFinite(amount) ? amount : 0
+}
+
 /** `1.234.567` — Cédula de Identidad paraguaya (máximo 8 dígitos). */
 export function formatCI(value: string): string {
   return groupThousands(onlyDigits(value).slice(0, 8))

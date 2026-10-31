@@ -2,10 +2,11 @@ import { useEffect, useState } from 'react'
 import { LogOut, Menu, X } from 'lucide-react'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../../features/auth/AuthContext'
+import { getRoleLabel } from '../../features/team/team-types'
 import { getInitials } from '../../lib/format'
 import { Brand } from './Brand'
 import { ConnectionStatus } from './ConnectionStatus'
-import { findNavItem, navItems, type NavItem } from './nav-items'
+import { findNavItem, getNavItems, type NavItem } from './nav-items'
 
 type NavItemLinkProps = {
   item: NavItem
@@ -44,14 +45,14 @@ function NavItemLink({ item, onNavigate }: NavItemLinkProps) {
   )
 }
 
-function NavList({ onNavigate }: { onNavigate?: () => void }) {
+function NavList({ items, onNavigate }: { items: NavItem[]; onNavigate?: () => void }) {
   return (
     <nav aria-label="Navegación principal" className="flex-1 overflow-y-auto px-3 py-4">
       <p className="px-3 pb-2 text-xs font-semibold uppercase tracking-wider text-slate-400">
         Clínica
       </p>
       <ul className="space-y-1">
-        {navItems.map((item) => (
+        {items.map((item) => (
           <li key={item.to}>
             <NavItemLink item={item} onNavigate={onNavigate} />
           </li>
@@ -62,11 +63,12 @@ function NavList({ onNavigate }: { onNavigate?: () => void }) {
 }
 
 type UserCardProps = {
-  email: string
+  name: string
+  subtitle: string
   onSignOut: () => void
 }
 
-function UserCard({ email, onSignOut }: UserCardProps) {
+function UserCard({ name, subtitle, onSignOut }: UserCardProps) {
   return (
     <div className="shrink-0 border-t border-slate-200 p-3">
       <div className="flex items-center gap-3 rounded-xl bg-slate-50 px-3 py-2.5">
@@ -74,13 +76,13 @@ function UserCard({ email, onSignOut }: UserCardProps) {
           aria-hidden="true"
           className="flex size-9 shrink-0 items-center justify-center rounded-full bg-brand-600 text-xs font-semibold text-white"
         >
-          {getInitials(email)}
+          {getInitials(name)}
         </span>
         <div className="min-w-0 flex-1">
-          <p className="text-[11px] font-medium uppercase tracking-wide text-slate-400">
-            Sesión iniciada
+          <p className="truncate text-[11px] font-medium uppercase tracking-wide text-slate-400">
+            {subtitle}
           </p>
-          <p className="truncate text-sm font-medium text-slate-900">{email || 'Usuario'}</p>
+          <p className="truncate text-sm font-medium text-slate-900">{name}</p>
         </div>
         <button
           type="button"
@@ -104,12 +106,17 @@ function UserCard({ email, onSignOut }: UserCardProps) {
  *   del scroll de fondo (imprescindible en una PWA instalada).
  */
 export function AppLayout() {
-  const { user, signOut } = useAuth()
+  const { user, profile, role, isAdmin, signOut } = useAuth()
   const [isDrawerOpen, setIsDrawerOpen] = useState(false)
   const location = useLocation()
   const navigate = useNavigate()
 
   const email = user?.email ?? ''
+  const displayName = profile?.full_name?.trim() || email || 'Usuario'
+  const userSubtitle = profile
+    ? `${getRoleLabel(role)} · ${email || 'sin correo'}`
+    : 'Sesión iniciada'
+  const navListItems = getNavItems(isAdmin)
   const currentSection = findNavItem(location.pathname)
 
   // Cierra el drawer con Escape o al navegar con el botón "atrás" del móvil.
@@ -147,8 +154,8 @@ export function AppLayout() {
         <div className="flex h-16 shrink-0 items-center border-b border-slate-200 px-5">
           <Brand />
         </div>
-        <NavList />
-        <UserCard email={email} onSignOut={handleSignOut} />
+        <NavList items={navListItems} />
+        <UserCard name={displayName} subtitle={userSubtitle} onSignOut={handleSignOut} />
       </aside>
 
       {/* Drawer de móvil / tablet */}
@@ -178,8 +185,8 @@ export function AppLayout() {
                 <X className="size-5" aria-hidden="true" />
               </button>
             </div>
-            <NavList onNavigate={() => setIsDrawerOpen(false)} />
-            <UserCard email={email} onSignOut={handleSignOut} />
+            <NavList items={navListItems} onNavigate={() => setIsDrawerOpen(false)} />
+            <UserCard name={displayName} subtitle={userSubtitle} onSignOut={handleSignOut} />
           </div>
         </div>
       )}

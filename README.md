@@ -92,36 +92,87 @@ powershell -ExecutionPolicy Bypass -File .\scripts\generate-icons.ps1
 
 ### 5. Base de datos (SQL)
 
-La migración `supabase/migrations/20261028090000_init_ad_clinic_schema.sql` crea el esquema
-completo: `patients`, `treatments`, `appointments`, `patient_treatments` y `transactions`,
-con índices, triggers de `updated_at`, la vista `patient_balances` y las políticas RLS.
+Las migraciones viven en `supabase/migrations` y se aplican **en orden**:
 
-Se aplica de cualquiera de estas dos formas:
+| Migración | Contenido |
+| --- | --- |
+| `20261028090000_init_ad_clinic_schema.sql` | Esquema completo: `patients`, `treatments`, `appointments`, `patient_treatments` y `transactions`, índices, triggers de `updated_at`, vista `patient_balances` y políticas RLS. |
+| `20261028110000_cash_indexes_and_currency.sql` | Índices de caja y moneda (`PYG`). |
+| `20261031100000_team_profiles_and_roles.sql` | Equipo: enum `staff_role`, tabla `profiles`, helpers `current_staff_role()` / `is_admin()`, triggers (perfil al crear usuario en Auth, sincronización de email, protección del último admin) y RLS por rol. |
+| `20261031110000_treatments_catalog_pyg.sql` | Precios de referencia del catálogo en guaraníes (solo pisa los importes placeholder en USD) + índices de búsqueda. |
 
-1. Supabase Dashboard → **SQL Editor** → pegar el archivo completo → *Run*.
+Se aplican de cualquiera de estas dos formas:
+
+1. Supabase Dashboard → **SQL Editor** → pegar cada archivo completo → *Run* (en orden).
 2. Supabase CLI: `supabase db push` (con el proyecto enlazado).
 
-> **RLS:** cualquier usuario **autenticado** puede leer y escribir en todas las tablas
-> (`for all to authenticated`); el rol `anon` no tiene acceso. Cuando existan roles
-> (administración / odontología / recepción) hay que reemplazar esas políticas.
+> **RLS de `profiles`:** cada persona ve su propio perfil y administración ve a todo el
+> equipo; las escrituras directas a `profiles` quedan restringidas a `admin`. El resto de
+> las tablas clínicas sigue con `for all to authenticated` (el rol `anon` no tiene acceso).
+>
+> **Bootstrap:** al aplicar la migración de equipo, el usuario **más antiguo** de
+> `auth.users` queda como `admin` y el resto como `receptionist`, así nadie se queda sin
+> administración. Para promover a otra persona:
+>
+> ```sql
+> update public.profiles set role = 'admin' where email = 'persona@clinica.com';
+> ```
+>
+> La base rechaza (`23514`) cualquier cambio que deje al consultorio **sin un
+> administrador activo**; la UI muestra el mismo aviso antes de intentarlo.
 
-### 6. Autenticación y navegación
+### 6. Edge Function `team-admin`
 
-Rutas con **react-router-dom** (`BrowserRouter`) y sesión con **Supabase Auth**.
+Crear usuarios de Auth desde el cliente no es viable: `supabase.auth.signUp()` reemplaza la
+sesión del administrador que está en pantalla. Por eso todas las escrituras del módulo de
+equipo pasan por una función que usa la `service_role` del proyecto:
+
+```bash
+supabase login
+supabase link --project-ref <project-ref>
+supabase functions deploy team-admin
+```
+
+Acciones soportadas (`action` en el body JSON):
+
+| Acción | Body | Efecto |
+| --- | --- | --- |
+| `create` | `fullName`, `email`, `password`, `role` | Crea el usuario en Auth con `email_confirm: true`, guarda `full_name`/`role` en los metadatos (el trigger crea el perfil) y devuelve el perfil. |
+| `update` | `memberId`, `fullName`, `role`, `isActive` | Actualiza `profiles` y sincroniza el acceso en Auth (`ban_duration` en lugar de borrar). Devuelve `warning` si el perfil se guardó pero Auth no quedó sincronizado. |
+| `reset-password` | `memberId`, `password` | Define la contraseña nueva; apto para entregar en persona o por un canal seguro. |
+
+La función valida que quien llama sea **admin activo** (con el JWT del request) y que nunca se
+quede el consultorio sin administración. Los secretos `SUPABASE_URL`,
+`SUPABASE_ANON_KEY` y `SUPABASE_SERVICE_ROLE_KEY` los inyecta Supabase; no se versiona nada.
+
+### 7. Autenticación, roles y navegación
+
+Rutas con **react-router-dom** (`BrowserRouter`) y sesión con **Supabase Auth**. El rol del
+personal se lee de `public.profiles`, no de Auth:
+
+| Rol | Alcance |
+| --- | --- |
+| `admin` | Gestiona equipo (`/equipo`), catálogo de tratamientos y caja. |
+| `dentist` | Atiende las citas y registra los tratamientos realizados. |
+| `receptionist` | Agenda citas, registra pacientes y carga cobros. |
 
 ```
 src/
 ├─ features/auth/
-│  ├─ AuthContext.ts    contexto + hook useAuth()
-│  ├─ AuthProvider.tsx  sesión (getSession + onAuthStateChange)
-│  ├─ auth-errors.ts    errores de Auth traducidos al español
-│  └─ RequireAuth.tsx   guard de rutas privadas
+│  ├─ AuthContext.ts          contexto + hook useAuth() + tipos del perfil
+│  ├─ AuthProvider.tsx        sesión (getSession + onAuthStateChange) y perfil
+│  ├─ auth-profile-service.ts lectura de public.profiles
+│  ├─ auth-errors.ts          errores de Auth traducidos al español
+│  ├─ RequireAuth.tsx         guard de rutas privadas
+│  └─ RequireAdmin.tsx        guard de rutas solo para administración
+├─ features/treatments/       catálogo: servicio, hook, toolbar, tabla, modal
+├─ features/team/             equipo: servicio, hook, toolbar, tabla y modales
 ├─ components/
 │  ├─ layout/AppLayout.tsx       sidebar fija (lg+) + drawer móvil + header
 │  ├─ layout/ConnectionStatus.tsx indicador PWA en línea / sin conexión
 │  ├─ layout/Brand.tsx           logotipo reutilizado en login y nav
 │  ├─ layout/nav-items.ts        definición de las secciones del menú
-│  └─ ui/                        FullScreenLoader, ComingSoon
+│  └─ ui/                        Modal, FullScreenLoader, ComingSoon
 ├─ hooks/useOnlineStatus.ts      eventos online/offline del navegador
 └─ pages/                        LoginPage + una página por sección
 ```
@@ -132,15 +183,29 @@ src/
 | `/` | Dashboard | Privada |
 | `/pacientes` | Pacientes / fichas clínicas | Privada |
 | `/citas` | Agenda de citas | Privada |
-| `/tratamientos` | Tratamientos | Privada |
+| `/tratamientos` | Catálogo de tratamientos (precios en PYG) | Privada |
 | `/caja` | Caja y finanzas | Privada |
+| `/equipo` | Equipo y roles | Solo `admin` |
 
 `useAuth()` es la única puerta al estado de sesión:
 
 ```tsx
 import { useAuth } from './features/auth/AuthContext'
 
-const { user, session, isLoading, isSigningIn, isAuthenticated, signIn, signOut } = useAuth()
+const {
+  user,
+  session,
+  profile, // { id, full_name, email, role, is_active } | null
+  role, // 'admin' | 'dentist' | 'receptionist' | null
+  isAdmin, // rol admin + perfil activo
+  isLoading,
+  isLoadingProfile,
+  isSigningIn,
+  isAuthenticated,
+  signIn,
+  signOut,
+  refreshProfile,
+} = useAuth()
 
 const { error } = await signIn('recepcion@adclinic.com', 'contraseña') // error: null si fue bien
 ```
@@ -149,7 +214,16 @@ Comportamiento relevante:
 
 - **Guard de rutas:** todo se monta dentro de `<RequireAuth>`; sin sesión se redirige a
   `/login` guardando la ruta original en `state.from` (solo se aceptan rutas internas).
-- **Sin registro público:** las cuentas se crean desde Supabase → *Authentication* → *Users*.
+- **Guard de administración:** `/equipo` se envuelve en `<RequireAdmin>`; mientras se carga el
+  perfil se muestra un loader y, si el rol no es `admin`, una pantalla de *Acceso restringido*.
+  El menú lateral se arma con `getNavItems(isAdmin)`, así que la sección solo aparece para
+  quien puede usarla.
+- **Usuarios:** no hay registro público. Las cuentas se crean desde `/equipo` (Edge Function
+  `team-admin`) o desde Supabase → *Authentication* → *Users*; en ese último caso el trigger
+  crea el perfil con rol `receptionist`, que luego se ajusta en `/equipo`.
+- **Bajas:** los usuarios y los tratamientos **no se borran**, se desactivan
+  (`is_active = false`): pierden el acceso o dejan de ofrecerse, pero se conserva el historial
+  clínico y de caja. La base impide quedarse sin ningún administrador activo.
 - **Sesión persistente:** `persistSession` + PKCE en `src/lib/supabase.ts`, así que la PWA
   reabre con la sesión iniciada; mientras se resuelve se muestra un loader para evitar el
   parpadeo hacia el login.
@@ -159,6 +233,6 @@ Comportamiento relevante:
   *En línea* / *Sin conexión*; en el login avisa además de que hace falta red para entrar.
 
 Para añadir una sección nueva: crear la página en `src/pages`, añadir la entrada en
-`src/components/layout/nav-items.ts` (label + icono + descripción) y registrar la `<Route>`
-en `src/App.tsx`.
+`src/components/layout/nav-items.ts` (label + icono + descripción + `adminOnly` si aplica) y
+registrar la `<Route>` en `src/App.tsx`.
 

@@ -1,4 +1,4 @@
-import { formatPYG } from '../../lib/format'
+import { formatPYG, formatPYGInput, parsePYGInput } from '../../lib/format'
 import { pad2, toDateKey } from './cash-dates'
 import type { CashMovement, TransactionType } from './cash-types'
 
@@ -11,24 +11,12 @@ import type { CashMovement, TransactionType } from './cash-types'
 
 /** `315000` → `315.000`; cualquier otro carácter se descarta. */
 export function formatAmountInput(value: string): string {
-  // `numeric(12, 2)` admite 10 dígitos enteros: se corta ahí para no desbordar.
-  const digits = value
-    .replace(/\D+/g, '')
-    .replace(/^0+(?=\d)/, '')
-    .slice(0, 10)
-
-  return digits.replace(/\B(?=(\d{3})+(?!\d))/g, '.')
+  return formatPYGInput(value)
 }
 
 /** `315.000` → `315000` (0 si el campo está vacío). */
 export function parseAmountInput(value: string): number {
-  const digits = value.replace(/\D+/g, '')
-
-  if (!digits) return 0
-
-  const amount = Number(digits)
-
-  return Number.isFinite(amount) ? amount : 0
+  return parsePYGInput(value)
 }
 
 /**

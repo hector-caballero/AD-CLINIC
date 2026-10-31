@@ -1,6 +1,7 @@
 import {
   CalendarDays,
   LayoutDashboard,
+  ShieldCheck,
   Stethoscope,
   Users,
   Wallet,
@@ -15,6 +16,8 @@ export type NavItem = {
   icon: LucideIcon
   /** `true` para que la ruta solo se marque como activa en coincidencia exacta. */
   end?: boolean
+  /** Solo visible para usuarios con rol `admin`. */
+  adminOnly?: boolean
 }
 
 export const navItems: NavItem[] = [
@@ -49,7 +52,23 @@ export const navItems: NavItem[] = [
     description: 'Cobros, pagos y saldos',
     icon: Wallet,
   },
+  {
+    to: '/equipo',
+    label: 'Equipo',
+    description: 'Usuarios y roles',
+    icon: ShieldCheck,
+    adminOnly: true,
+  },
 ]
+
+/**
+ * Ítems que puede ver el usuario según su rol.
+ * Los `adminOnly` solo aparecen para administración (la ruta igual está
+ * protegida con `<RequireAdmin>`, esto es solo la navegación).
+ */
+export function getNavItems(isAdmin: boolean): NavItem[] {
+  return isAdmin ? navItems : navItems.filter((item) => !item.adminOnly)
+}
 
 /** Sección activa según la ruta actual (para el título del header). */
 export function findNavItem(pathname: string): NavItem | undefined {
