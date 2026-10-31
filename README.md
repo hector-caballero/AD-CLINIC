@@ -81,6 +81,12 @@ permiten las variables declaradas allí).
 - cachea con `CacheFirst` solo los objetos **públicos** de Supabase Storage. Los datos
   clínicos (REST/Auth) no se cachean a propósito para no persistir información de pacientes.
 
+La estrategia de actualización es `registerType: 'autoUpdate'` + `skipWaiting: true` +
+`clientsClaim: true` + `cleanupOutdatedCaches: true`: al publicar una versión nueva, el
+service worker se activa enseguida, toma el control de las pestañas abiertas y descarta
+las cachés de precache antiguas. Así los clientes reciben el bundle nuevo sin tener que
+borrar caché ni cookies a mano (el contenido se ve al recargar o navegar dentro de la app).
+
 Para probarlo: `npm run build && npm run preview`, y en DevTools → *Application* →
 *Service Workers* / *Manifest*. Se puede simular el modo offline con la casilla *Offline*.
 

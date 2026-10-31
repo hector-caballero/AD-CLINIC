@@ -83,6 +83,15 @@ export default defineConfig({
         navigateFallback: '/index.html',
         // Rutas que nunca deben resolverse contra el app shell (callbacks de auth, API).
         navigateFallbackDenylist: [/^\/auth\//, /^\/api\//],
+        // `skipWaiting`: el service worker nuevo se activa sin esperar a que se cierren
+        // las pestañas antiguas. `clientsClaim`: toma el control de las pestañas ya
+        // abiertas en cuanto se activa. Sin ambos, el SW anterior sigue sirviendo el
+        // bundle viejo hasta que el usuario cierra todas las pestañas o limpia la caché.
+        // (Ojo: el plugin solo los añade por defecto con `injectRegister: 'auto'`, así
+        // que aquí, con `script-defer`, hay que declararlos explícitamente.)
+        skipWaiting: true,
+        clientsClaim: true,
+        // Elimina las cachés de precache de versiones anteriores que ya no se usan.
         cleanupOutdatedCaches: true,
         // Assets pesados (p. ej. imágenes de fondo) superan el límite por defecto (2 MiB).
         maximumFileSizeToCacheInBytes: 4 * 1024 * 1024,
