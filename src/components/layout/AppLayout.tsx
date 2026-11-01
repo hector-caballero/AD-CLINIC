@@ -152,7 +152,7 @@ export function AppLayout() {
       {/* Sidebar de escritorio */}
       <aside className="hidden border-r border-slate-200/80 bg-white/80 backdrop-blur-md lg:sticky lg:top-0 lg:flex lg:h-svh lg:flex-col">
         <div className="flex h-16 shrink-0 items-center border-b border-slate-200/70 px-5">
-          <Brand size={38} />
+          <Brand size={40} />
         </div>
         <NavList items={navListItems} />
         <UserCard name={displayName} subtitle={userSubtitle} onSignOut={handleSignOut} />
@@ -175,7 +175,7 @@ export function AppLayout() {
             className="absolute inset-y-0 left-0 flex w-72 max-w-[85vw] flex-col bg-white/95 shadow-panel backdrop-blur-xl"
           >
             <div className="flex h-16 shrink-0 items-center justify-between gap-2 border-b border-slate-200/70 px-4">
-              <Brand size={38} />
+              <Brand size={40} />
               <button
                 type="button"
                 onClick={() => setIsDrawerOpen(false)}

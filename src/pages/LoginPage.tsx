@@ -81,7 +81,7 @@ export default function LoginPage() {
           aria-hidden="true"
           className="pointer-events-none absolute -bottom-40 -left-24 size-96 rounded-full bg-bronze-200/40 blur-3xl"
         />
-        <Brand className="relative" size={46} />
+        <Brand className="relative" size={120} variant="full" />
 
         <div className="relative max-w-md">
           <p className="text-[11px] font-semibold tracking-[0.32em] text-bronze-500 uppercase">

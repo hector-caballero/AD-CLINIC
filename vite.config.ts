@@ -84,7 +84,7 @@ export default defineConfig({
       },
       workbox: {
         // Precarga del app shell: JS, CSS, HTML e imágenes estáticas.
-        globPatterns: ['**/*.{js,css,html,ico,svg,png,webp,woff,woff2}'],
+        globPatterns: ['**/*.{js,css,html,ico,svg,png,webp,jpeg,jpg,woff,woff2}'],
         // Soporte offline para la SPA: cualquier navegación cae en el index.html cacheado.
         navigateFallback: '/index.html',
         // Rutas que nunca deben resolverse contra el app shell (callbacks de auth, API).

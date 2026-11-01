@@ -104,7 +104,7 @@ borrar caché ni cookies a mano (el contenido se ve al recargar o navegar dentro
 Para probarlo: `npm run build && npm run preview`, y en DevTools → *Application* →
 *Service Workers* / *Manifest*. Se puede simular el modo offline con la casilla *Offline*.
 
-Los iconos, el favicon y el logotipo salen del mismo trazado vectorial
+Los iconos y el favicon salen del mismo trazado vectorial
 (`scripts/generate-brand-assets.mjs`), que los regenera de una sola pasada:
 
 ```powershell
@@ -115,8 +115,16 @@ Genera `public/favicon.svg` + `public/favicon.ico`, `public/icons/icon.svg`,
 `icon-192/512.png`, `maskable-192/512.png`, `apple-touch-icon-180.png` y los SVG de
 `public/brand/` (`ad-clinic-mark.svg`, `ad-clinic-logo.svg`). Rasteriza con el Chrome/Edge
 instalado en modo headless; si no lo encuentra en las rutas habituales, se indica con
-`CHROME_PATH`. El componente `src/components/layout/Logo.tsx` dibuja el mismo isotipo en
-línea (sin peticiones extra) y `Brand.tsx` lo acompaña del wordmark y el tagline.
+`CHROME_PATH`.
+
+El logotipo de la interfaz es el archivo definitivo `public/brand/logo-original.jpeg`
+(1280 × 747, no se genera): `src/components/layout/Logo.tsx` lo inserta como placa
+redondeada con dos encuadres —`full`, el lockup completo con descriptor y
+`object-contain`; y `compact`, recorte de la banda de contenido para barras y cabeceras—
+y `Brand.tsx` es el envoltorio que consumen `AppLayout` y `LoginPage`. El ancho se deriva
+siempre del alto, así que el logotipo nunca se deforma. El `.jpeg` está incluido en el
+precache de Workbox (`globPatterns` de `vite.config.ts`) para que aparezca también sin
+conexión.
 
 ### 5. Base de datos (SQL)
 
@@ -201,8 +209,8 @@ src/
 ├─ components/
 │  ├─ layout/AppLayout.tsx       sidebar fija (lg+) + drawer móvil + header
 │  ├─ layout/ConnectionStatus.tsx indicador PWA en línea / sin conexión
-│  ├─ layout/Logo.tsx            isotipo vectorial (diente + monograma AD) reutilizable
-│  ├─ layout/Brand.tsx           logotipo completo (isotipo + wordmark) para login y nav
+│  ├─ layout/Logo.tsx            placa con el JPEG oficial (encuadres full / compact)
+│  ├─ layout/Brand.tsx           envoltorio del logotipo para login y navegación
 │  ├─ layout/nav-items.ts        definición de las secciones del menú
 │  └─ ui/                        Modal, FullScreenLoader, ComingSoon
 ├─ hooks/useOnlineStatus.ts      eventos online/offline del navegador
