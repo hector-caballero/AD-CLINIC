@@ -8,6 +8,7 @@ import CashPage from './pages/CashPage'
 import DashboardPage from './pages/DashboardPage'
 import LoginPage from './pages/LoginPage'
 import NotFoundPage from './pages/NotFoundPage'
+import OdontogramPage from './pages/OdontogramPage'
 import PatientsPage from './pages/PatientsPage'
 import TeamPage from './pages/TeamPage'
 import TreatmentsPage from './pages/TreatmentsPage'
@@ -32,6 +33,7 @@ export default function App() {
               <Route path="pacientes" element={<PatientsPage />} />
               <Route path="citas" element={<AppointmentsPage />} />
               <Route path="tratamientos" element={<TreatmentsPage />} />
+              <Route path="odontograma" element={<OdontogramPage />} />
               <Route path="caja" element={<CashPage />} />
               <Route
                 path="equipo"

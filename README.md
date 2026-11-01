@@ -106,6 +106,7 @@ Las migraciones viven en `supabase/migrations` y se aplican **en orden**:
 | `20261028110000_cash_indexes_and_currency.sql` | Índices de caja y moneda (`PYG`). |
 | `20261031100000_team_profiles_and_roles.sql` | Equipo: enum `staff_role`, tabla `profiles`, helpers `current_staff_role()` / `is_admin()`, triggers (perfil al crear usuario en Auth, sincronización de email, protección del último admin) y RLS por rol. |
 | `20261031110000_treatments_catalog_pyg.sql` | Precios de referencia del catálogo en guaraníes (solo pisa los importes placeholder en USD) + índices de búsqueda. |
+| `20261031120000_odontogram_and_budget.sql` | Odontograma: enums de dentición/cara/estado, tablas `odontograms` y `odontogram_items` con el precio en PYG, validación FDI (11-48 y 51-85), índices anti-duplicado y RLS (lectura para el personal, escritura para odontología y administración). |
 
 Se aplican de cualquiera de estas dos formas:
 
@@ -172,6 +173,7 @@ src/
 │  ├─ RequireAuth.tsx         guard de rutas privadas
 │  └─ RequireAdmin.tsx        guard de rutas solo para administración
 ├─ features/treatments/       catálogo: servicio, hook, toolbar, tabla, modal
+├─ features/odontogram/       odontograma SVG, servicio de ítems, presupuesto y modal de pieza
 ├─ features/team/             equipo: servicio, hook, toolbar, tabla y modales
 ├─ components/
 │  ├─ layout/AppLayout.tsx       sidebar fija (lg+) + drawer móvil + header
@@ -190,6 +192,7 @@ src/
 | `/pacientes` | Pacientes / fichas clínicas | Privada |
 | `/citas` | Agenda de citas | Privada |
 | `/tratamientos` | Catálogo de tratamientos (precios en PYG) | Privada |
+| `/odontograma` | Odontograma interactivo y presupuesto dental | Privada (escritura: `dentist` / `admin`) |
 | `/caja` | Caja y finanzas | Privada |
 | `/equipo` | Equipo y roles | Solo `admin` |
 
@@ -241,4 +244,36 @@ Comportamiento relevante:
 Para añadir una sección nueva: crear la página en `src/pages`, añadir la entrada en
 `src/components/layout/nav-items.ts` (label + icono + descripción + `adminOnly` si aplica) y
 registrar la `<Route>` en `src/App.tsx`.
+
+### 8. Odontograma y presupuesto dental
+
+`/odontograma` muestra el mapa dental del paciente y arma su plan de tratamiento en guaraníes.
+Se abre con el buscador de pacientes o por enlace directo: `/odontograma?paciente=<uuid>`.
+
+- **Estructura:** `odontograms` guarda un mapa por paciente y dentición (`permanent` FDI 11-48,
+  `temporary` FDI 51-85); `odontogram_items` guarda cada procedimiento sobre una pieza y,
+  opcionalmente, una cara (`occlusal`, `vestibular`, `lingual`, `mesial` o `distal`). Sin cara
+  significa pieza completa (corona, extracción, etc.).
+- **Estados y colores:** `pending` (rojo, patología/pendiente), `budgeted` (verde,
+  presupuestado), `completed` (azul, realizado) y `absent` (gris con una X, pieza ausente). Si
+  una cara acumula varios procedimientos, el SVG pinta el estado más relevante.
+- **Orientación clínica:** el SVG dibuja la arcada superior e inferior como se mira al paciente;
+  mesial apunta siempre a la línea media, vestibular hacia fuera de la arcada y lingual/palatino
+  hacia dentro. El número de la pieza abre la selección de «pieza completa».
+- **Presupuesto:** el modal de la pieza consulta `treatments` (solo activos), copia el precio
+  del catálogo en PYG y permite ajustarlo; el importe queda congelado en `unit_price`. El panel
+  de la derecha suma pendientes + presupuestados + realizados, muestra subtotales por estado y el
+  desglose pieza / cara / procedimiento, con acciones para cambiar el estado o quitar la línea.
+- **Sin duplicados:** un mismo tratamiento no se repite sobre la misma pieza y cara; volver a
+  guardarlo actualiza la línea existente. Un índice único parcial lo garantiza en la base.
+- **RLS:** cualquier integrante con perfil activo puede leer el odontograma (recepción lo usa
+  para cotizar), pero solo `dentist` y `admin` insertan, actualizan o borran
+  (`can_manage_odontograms()`); la UI oculta las acciones de escritura para el resto.
+- **Validación:** el trigger `validate_odontogram_item` rechaza piezas que no correspondan a la
+  dentición del mapa, sella `performed_at` al pasar a `completed` y limpia superficie/precio en
+  los ítems `absent`.
+
+> La migración del odontograma usa los helpers `current_staff_role()` e `is_admin()` de
+> `20261031100000_team_profiles_and_roles.sql`, así que debe aplicarse después de esa.
+
 

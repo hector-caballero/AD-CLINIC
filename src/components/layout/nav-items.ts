@@ -1,5 +1,6 @@
 import {
   CalendarDays,
+  ClipboardList,
   LayoutDashboard,
   ShieldCheck,
   Stethoscope,
@@ -45,6 +46,12 @@ export const navItems: NavItem[] = [
     label: 'Tratamientos',
     description: 'Catálogo y planes',
     icon: Stethoscope,
+  },
+  {
+    to: '/odontograma',
+    label: 'Odontograma',
+    description: 'Mapa dental y presupuesto',
+    icon: ClipboardList,
   },
   {
     to: '/caja',
