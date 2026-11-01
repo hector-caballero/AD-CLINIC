@@ -21,7 +21,7 @@ export type PatientPickerProps = {
 const MAX_RESULTS = 6
 
 const INPUT_CLASS =
-  'w-full rounded-xl border border-slate-300 bg-white py-2.5 pl-9 pr-3 text-sm text-slate-900 shadow-sm transition-colors placeholder:text-slate-400 focus:border-brand-500'
+  'w-full rounded-xl border border-slate-300 bg-white/85 py-2.5 pl-9 pr-3 text-sm text-slate-900 shadow-sm transition-colors placeholder:text-slate-400 focus:border-brand-500'
 
 /**
  * Buscador de pacientes ya registrados.

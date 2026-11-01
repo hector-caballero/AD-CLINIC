@@ -36,7 +36,7 @@ export function RequireAdmin({ children }: RequireAdminProps) {
 
 function AccessDenied() {
   return (
-    <section className="mx-auto max-w-lg rounded-2xl border border-slate-200 bg-white p-8 text-center shadow-sm">
+    <section className="mx-auto max-w-lg rounded-2xl border border-slate-200/80 bg-white/85 p-8 text-center shadow-card backdrop-blur-md">
       <span
         aria-hidden="true"
         className="mx-auto flex size-12 items-center justify-center rounded-full bg-amber-50 text-amber-600"
@@ -52,7 +52,7 @@ function AccessDenied() {
       </p>
       <Link
         to="/"
-        className="mt-6 inline-flex items-center justify-center rounded-xl bg-brand-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-brand-700"
+        className="mt-6 inline-flex items-center justify-center rounded-xl bg-brand-500 px-4 py-2.5 text-sm font-semibold text-ink-950 shadow-sm shadow-brand-500/30 ring-1 ring-brand-600/25 transition-colors hover:bg-brand-400"
       >
         Volver al dashboard
       </Link>

@@ -50,9 +50,9 @@ const ACTION_ICONS: Record<AppointmentStatus, typeof RotateCcw> = {
 
 const ACTION_TONES = {
   primary:
-    'bg-brand-600 text-white shadow-sm hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-70',
+    'bg-brand-500 text-ink-950 shadow-sm shadow-brand-500/30 ring-1 ring-brand-600/25 hover:bg-brand-400 disabled:cursor-not-allowed disabled:opacity-70',
   neutral:
-    'border border-slate-300 bg-white text-slate-700 shadow-sm hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50',
+    'border border-slate-300 bg-white/85 text-slate-700 shadow-sm hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50',
 } as const
 
 /** Citas agrupadas por día, con acciones rápidas y recordatorio de WhatsApp. */
@@ -225,7 +225,7 @@ function AppointmentRow({
               disabled={isPending}
               onClick={() => onCancel(appointment)}
               aria-label={`Cancelar la cita de ${patientName} a las ${start}`}
-              className="inline-flex items-center gap-1 rounded-lg border border-rose-200 bg-white px-2.5 py-1 text-xs font-medium text-rose-600 transition-colors hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-50"
+              className="inline-flex items-center gap-1 rounded-lg border border-rose-200 bg-white/85 px-2.5 py-1 text-xs font-medium text-rose-600 transition-colors hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-50"
             >
               <Ban className="size-3.5" aria-hidden="true" />
               Cancelar
@@ -253,7 +253,7 @@ function AppointmentRow({
             type="button"
             onClick={() => onEdit(appointment)}
             aria-label={`Editar la cita de ${patientName} a las ${start}`}
-            className="rounded-lg border border-slate-300 bg-white p-1.5 text-slate-500 transition-colors hover:bg-slate-50 hover:text-slate-700"
+            className="rounded-lg border border-slate-300 bg-white/85 p-1.5 text-slate-500 transition-colors hover:bg-slate-50 hover:text-slate-700"
           >
             <Pencil className="size-3.5" aria-hidden="true" />
           </button>

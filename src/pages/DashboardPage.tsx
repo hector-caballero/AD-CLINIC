@@ -56,7 +56,7 @@ export default function DashboardPage() {
           return (
             <article
               key={metric.label}
-              className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"
+              className="rounded-2xl border border-slate-200/80 bg-white/85 p-5 shadow-card backdrop-blur-md"
             >
               <div className="flex items-start justify-between gap-3">
                 <p className="text-sm font-medium text-slate-500">{metric.label}</p>
@@ -73,7 +73,7 @@ export default function DashboardPage() {
         })}
       </section>
 
-      <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+      <section className="rounded-2xl border border-slate-200/80 bg-white/85 p-6 shadow-card backdrop-blur-md">
         <h3 className="text-base font-semibold tracking-tight text-slate-900">Próximos pasos</h3>
         <ol className="mt-3 space-y-2 text-sm text-slate-600">
           <li>1. Alta y búsqueda de pacientes.</li>

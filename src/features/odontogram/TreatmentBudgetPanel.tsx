@@ -146,7 +146,7 @@ function BudgetItemRow({
             disabled={isBusy}
             title="Quitar del plan"
             aria-label={`Quitar ${getItemLabel(item)}`}
-            className={`${ACTION_CLASS} ml-auto border-slate-200 bg-white text-slate-500 hover:bg-slate-50 hover:text-red-600`}
+            className={`${ACTION_CLASS} ml-auto border-slate-200/80 bg-white/85 text-slate-500 hover:bg-slate-50 hover:text-red-600`}
           >
             <Trash className="size-3.5" aria-hidden="true" />
             Quitar
@@ -250,10 +250,10 @@ export function TreatmentBudgetPanel({
   const dentitionLabel = dentition === 'permanent' ? 'Dentición permanente' : 'Dentición temporal'
 
   return (
-    <aside className="flex flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-      <header className="border-b border-slate-100 px-4 py-4 sm:px-5">
+    <aside className="flex flex-col overflow-hidden rounded-2xl border border-slate-200/80 bg-white/85 shadow-card backdrop-blur-md">
+      <header className="border-b border-slate-200/70 px-4 py-4 sm:px-5">
         <div className="flex items-center justify-between gap-2">
-          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+          <p className="text-[11px] font-semibold tracking-[0.18em] text-bronze-500 uppercase">
             Plan de tratamiento
           </p>
           <span className="rounded-full bg-brand-50 px-2 py-0.5 text-[11px] font-semibold text-brand-700 ring-1 ring-brand-100">
@@ -288,7 +288,7 @@ export function TreatmentBudgetPanel({
               <button
                 type="button"
                 onClick={onChargePlan}
-                className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-brand-600 px-3 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-brand-700"
+                className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-brand-500 px-3 py-2.5 text-sm font-semibold text-ink-950 shadow-sm shadow-brand-500/30 ring-1 ring-brand-600/25 transition-colors hover:bg-brand-400"
               >
                 <Banknote className="size-4" aria-hidden="true" />
                 Cobrar este plan
@@ -321,7 +321,7 @@ export function TreatmentBudgetPanel({
             <button
               type="button"
               onClick={onRetry}
-              className="mt-3 inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-50"
+              className="mt-3 inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white/85 px-3 py-1.5 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-50"
             >
               <RefreshCw className="size-3.5" aria-hidden="true" />
               Reintentar

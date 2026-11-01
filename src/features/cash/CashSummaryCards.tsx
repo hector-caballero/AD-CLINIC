@@ -9,7 +9,7 @@ type CashSummaryCardsProps = {
   monthLabel: string
 }
 
-const CARD_CLASS = 'rounded-2xl border border-slate-200 bg-white p-5 shadow-sm'
+const CARD_CLASS = 'rounded-2xl border border-slate-200/80 bg-white/85 p-5 shadow-card backdrop-blur-md'
 
 function SkeletonValue() {
   return <span className="mt-3 block h-8 w-32 animate-pulse rounded-lg bg-slate-100" />

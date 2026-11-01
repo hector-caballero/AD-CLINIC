@@ -29,7 +29,7 @@ import { useOdontogram } from '../features/odontogram/useOdontogram'
 import { getInitials, formatPYG } from '../lib/format'
 
 const SECONDARY_BUTTON_CLASS =
-  'inline-flex items-center justify-center gap-2 rounded-xl border border-slate-300 bg-white px-3.5 py-2 text-sm font-medium text-slate-700 shadow-sm transition-colors hover:bg-slate-50'
+  'inline-flex items-center justify-center gap-2 rounded-xl border border-slate-300 bg-white/85 px-3.5 py-2 text-sm font-medium text-slate-700 shadow-sm transition-colors hover:bg-slate-50'
 
 type Notice = { tone: 'success' | 'error'; message: string }
 
@@ -260,7 +260,7 @@ export default function OdontogramPage() {
       )}
 
       {!patient ? (
-        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
+        <section className="rounded-2xl border border-slate-200/80 bg-white/85 p-5 shadow-card backdrop-blur-md sm:p-6">
           <div className="flex items-start gap-3">
             <span className="flex size-11 shrink-0 items-center justify-center rounded-2xl bg-brand-50 text-brand-700">
               <Users className="size-5" aria-hidden="true" />
@@ -309,12 +309,12 @@ export default function OdontogramPage() {
         </section>
       ) : (
         <>
-          <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
+          <section className="rounded-2xl border border-slate-200/80 bg-white/85 p-4 shadow-card backdrop-blur-md sm:p-5">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div className="flex min-w-0 items-center gap-3">
                 <span
                   aria-hidden="true"
-                  className="flex size-10 shrink-0 items-center justify-center rounded-full bg-brand-600 text-xs font-semibold text-white"
+                  className="flex size-10 shrink-0 items-center justify-center rounded-full bg-bronze-600 text-xs font-semibold text-white ring-1 ring-bronze-500/30"
                 >
                   {getInitials(patientName)}
                 </span>
@@ -344,7 +344,7 @@ export default function OdontogramPage() {
                         className={[
                           'rounded-lg px-3 py-1.5 text-xs font-medium transition-colors',
                           isActive
-                            ? 'bg-white text-brand-800 shadow-sm ring-1 ring-slate-200'
+                            ? 'bg-white/85 text-brand-800 shadow-sm ring-1 ring-slate-200'
                             : 'text-slate-500 hover:text-slate-800',
                         ].join(' ')}
                       >
@@ -389,7 +389,7 @@ export default function OdontogramPage() {
             <section
               aria-label="Odontograma"
               aria-busy={odontogram.isLoading}
-              className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm sm:p-4"
+              className="rounded-2xl border border-slate-200/80 bg-white/85 p-3 shadow-card backdrop-blur-md sm:p-4"
             >
               <OdontogramChart
                 dentition={dentition}

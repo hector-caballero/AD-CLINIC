@@ -7,8 +7,8 @@ type FullScreenLoaderProps = {
 /** Pantalla de espera a página completa (arranque, sesión, carga de datos). */
 export function FullScreenLoader({ label = 'Cargando…' }: FullScreenLoaderProps) {
   return (
-    <div className="flex min-h-svh flex-col items-center justify-center gap-3 bg-slate-50 px-6 text-center">
-      <LoaderCircle className="size-8 animate-spin text-brand-600" aria-hidden="true" />
+    <div className="flex min-h-svh flex-col items-center justify-center gap-3 bg-canvas px-6 text-center">
+      <LoaderCircle className="size-8 animate-spin text-brand-500" aria-hidden="true" />
       <p className="text-sm font-medium text-slate-500" role="status">
         {label}
       </p>

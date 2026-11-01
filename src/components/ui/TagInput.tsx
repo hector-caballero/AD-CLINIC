@@ -87,7 +87,7 @@ export function TagInput({
         </span>
       </div>
 
-      <div className="mt-1.5 flex flex-wrap items-center gap-1.5 rounded-xl border border-slate-300 bg-white px-2 py-2 transition-colors focus-within:border-brand-500 focus-within:ring-2 focus-within:ring-brand-100">
+      <div className="mt-1.5 flex flex-wrap items-center gap-1.5 rounded-xl border border-slate-300 bg-white/85 px-2 py-2 transition-colors focus-within:border-brand-500 focus-within:ring-2 focus-within:ring-brand-100">
         {value.length > 0 && (
           <ul className="contents" aria-label={`${label} agregados`}>
             {value.map((tag) => (

@@ -66,7 +66,7 @@ const MEDICATION_SUGGESTIONS = [
 
 function inputClass(hasError: boolean): string {
   return [
-    'w-full rounded-xl border bg-white px-3 py-2.5 text-sm text-slate-900 shadow-sm transition-colors placeholder:text-slate-400',
+    'w-full rounded-xl border bg-white/85 px-3 py-2.5 text-sm text-slate-900 shadow-sm transition-colors placeholder:text-slate-400',
     hasError ? 'border-red-300' : 'border-slate-300 focus:border-brand-500',
   ].join(' ')
 }
@@ -324,7 +324,7 @@ export function PatientFormModal({ patient, onClose, onSaved }: PatientFormModal
               type="button"
               onClick={onClose}
               disabled={isSaving}
-              className="inline-flex items-center justify-center rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 shadow-sm transition-colors hover:bg-slate-50 disabled:opacity-50"
+              className="inline-flex items-center justify-center rounded-xl border border-slate-300 bg-white/85 px-4 py-2.5 text-sm font-medium text-slate-700 shadow-sm transition-colors hover:bg-slate-50 disabled:opacity-50"
             >
               Cancelar
             </button>
@@ -332,7 +332,7 @@ export function PatientFormModal({ patient, onClose, onSaved }: PatientFormModal
               type="submit"
               form="patient-form"
               disabled={isSaving || !isOnline}
-              className="inline-flex items-center justify-center gap-2 rounded-xl bg-brand-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-60"
+              className="inline-flex items-center justify-center gap-2 rounded-xl bg-brand-500 px-4 py-2.5 text-sm font-semibold text-ink-950 shadow-sm shadow-brand-500/30 ring-1 ring-brand-600/25 transition-colors hover:bg-brand-400 disabled:cursor-not-allowed disabled:opacity-60"
             >
               {isSaving ? (
                 <Loader2 className="size-4 animate-spin" aria-hidden="true" />

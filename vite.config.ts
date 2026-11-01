@@ -30,10 +30,16 @@ export default defineConfig({
         display: 'standalone',
         display_override: ['window-controls-overlay', 'standalone', 'minimal-ui'],
         orientation: 'portrait',
-        theme_color: '#0c4a6e',
-        background_color: '#f8fafc',
+        theme_color: '#FCFBF9',
+        background_color: '#FCFBF9',
         categories: ['medical', 'health', 'productivity'],
         icons: [
+          {
+            src: '/favicon.svg',
+            sizes: 'any',
+            type: 'image/svg+xml',
+            purpose: 'any',
+          },
           {
             src: '/icons/icon-192.png',
             sizes: '192x192',

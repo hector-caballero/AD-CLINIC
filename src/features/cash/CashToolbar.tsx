@@ -61,7 +61,7 @@ export function CashToolbar({
               onChange={(event) => onQueryChange(event.target.value)}
               placeholder="Buscar por paciente, concepto o recibo…"
               autoComplete="off"
-              className="w-full rounded-xl border border-slate-300 bg-white py-2.5 pl-9 pr-9 text-sm text-slate-900 shadow-sm transition-colors placeholder:text-slate-400 focus:border-brand-500 sm:w-80"
+              className="w-full rounded-xl border border-slate-300 bg-white/85 py-2.5 pl-9 pr-9 text-sm text-slate-900 shadow-sm transition-colors placeholder:text-slate-400 focus:border-brand-500 sm:w-80"
             />
             {query && (
               <button
@@ -88,7 +88,7 @@ export function CashToolbar({
                   className={[
                     'rounded-lg px-3 py-1.5 text-xs font-medium transition-colors sm:text-sm',
                     isActive
-                      ? 'bg-white text-slate-900 shadow-sm ring-1 ring-slate-200'
+                      ? 'bg-white/85 text-slate-900 shadow-sm ring-1 ring-slate-200'
                       : 'text-slate-500 hover:text-slate-800',
                   ].join(' ')}
                 >
@@ -105,7 +105,7 @@ export function CashToolbar({
             onClick={onRefresh}
             aria-label="Actualizar el historial y los saldos"
             title="Actualizar"
-            className="inline-flex items-center justify-center rounded-xl border border-slate-300 bg-white p-2.5 text-slate-500 shadow-sm transition-colors hover:bg-slate-50 hover:text-slate-900"
+            className="inline-flex items-center justify-center rounded-xl border border-slate-300 bg-white/85 p-2.5 text-slate-500 shadow-sm transition-colors hover:bg-slate-50 hover:text-slate-900"
           >
             <RefreshCw
               className={`size-4 ${isRefreshing ? 'animate-spin text-brand-600' : ''}`}
@@ -116,7 +116,7 @@ export function CashToolbar({
           <button
             type="button"
             onClick={onCreate}
-            className="inline-flex items-center justify-center gap-2 rounded-xl bg-brand-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-brand-700"
+            className="inline-flex items-center justify-center gap-2 rounded-xl bg-brand-500 px-4 py-2.5 text-sm font-semibold text-ink-950 shadow-sm shadow-brand-500/30 ring-1 ring-brand-600/25 transition-colors hover:bg-brand-400"
           >
             <HandCoins className="size-4" aria-hidden="true" />
             Registrar cobro
@@ -146,7 +146,7 @@ export function CashToolbar({
                 className={[
                   'inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-medium transition-colors',
                   isActive
-                    ? 'bg-white text-slate-900 shadow-sm ring-1 ring-slate-200'
+                    ? 'bg-white/85 text-slate-900 shadow-sm ring-1 ring-slate-200'
                     : 'text-slate-500 hover:text-slate-800',
                 ].join(' ')}
               >

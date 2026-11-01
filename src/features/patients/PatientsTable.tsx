@@ -194,7 +194,7 @@ export function PatientsTable({ patients, onEdit, onDelete }: PatientsTableProps
                     type="button"
                     onClick={() => onEdit(patient)}
                     aria-label={`Editar la ficha de ${fullName}`}
-                    className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-50"
+                    className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-slate-300 bg-white/85 px-3 py-1.5 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-50"
                   >
                     <Pencil className="size-3.5" aria-hidden="true" />
                     Editar

@@ -327,7 +327,7 @@ function OdontogramLegend() {
       })}
       <li className="inline-flex items-center gap-1.5">
         <span
-          className="size-2.5 shrink-0 rounded-full border-2 border-slate-500 bg-white"
+          className="size-2.5 shrink-0 rounded-full border-2 border-slate-500 bg-white/85"
           aria-hidden="true"
         />
         Borde = pieza completa

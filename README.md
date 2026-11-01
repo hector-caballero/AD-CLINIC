@@ -67,10 +67,24 @@ const { data, error } = await supabase.from('patients').select('*')
 Los tipos de `import.meta.env` viven en `src/vite-env.d.ts` (modo estricto: solo se
 permiten las variables declaradas allí).
 
-### 3. Tailwind CSS
+### 3. Tailwind CSS e identidad visual
 
-`src/index.css` importa `tailwindcss` y define los tokens de marca en `@theme`:
-`bg-brand-600`, `text-brand-900`, `border-brand-200`, etc. No requiere `tailwind.config.js`.
+`src/index.css` importa `tailwindcss` y define la paleta en `@theme` (no hace falta
+`tailwind.config.js`):
+
+| Grupo | Tokens | Uso |
+| --- | --- | --- |
+| Dorado champaña | `brand-50…950` (`#D4AF37`) | Botones primarios, estados activos, focos y detalles |
+| Bronce cálido | `bronze-50…900` (`#9A7B56`) | Textos secundarios de marca, iniciales de avatar, etiquetas |
+| Neutros cálidos | `slate-50…950` (redefinidos) | Toda la interfaz: hereda el tono marfil sin tocar componentes |
+| Tinta | `ink-700…950` (`#2A2724`) | Texto sobre superficies doradas |
+| Lienzo | `canvas`, `canvas-warm`, `surface` | Fondo marfil (`#FCFBF9`) y superficies translúcidas |
+| Sombras | `shadow-sm`, `shadow-card`, `shadow-panel`, `shadow-gold` | Profundidad suave, nunca negro puro |
+| Tipografía | `font-display` (serif editorial) | Logotipo y titulares de marca; el resto usa `font-sans` |
+
+Reglas de la casa: los botones primarios son **dorados con texto `ink-950`** (contraste AA),
+nunca blanco sobre dorado; las tarjetas usan `bg-white/85` + `border-slate-200/80` +
+`shadow-card`; los modales y el sidebar añaden `backdrop-blur`.
 
 ### 4. PWA (offline)
 
@@ -90,11 +104,19 @@ borrar caché ni cookies a mano (el contenido se ve al recargar o navegar dentro
 Para probarlo: `npm run build && npm run preview`, y en DevTools → *Application* →
 *Service Workers* / *Manifest*. Se puede simular el modo offline con la casilla *Offline*.
 
-Los iconos están en `public/icons` y se pueden regenerar con:
+Los iconos, el favicon y el logotipo salen del mismo trazado vectorial
+(`scripts/generate-brand-assets.mjs`), que los regenera de una sola pasada:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\generate-icons.ps1
+npm run brand:assets
 ```
+
+Genera `public/favicon.svg` + `public/favicon.ico`, `public/icons/icon.svg`,
+`icon-192/512.png`, `maskable-192/512.png`, `apple-touch-icon-180.png` y los SVG de
+`public/brand/` (`ad-clinic-mark.svg`, `ad-clinic-logo.svg`). Rasteriza con el Chrome/Edge
+instalado en modo headless; si no lo encuentra en las rutas habituales, se indica con
+`CHROME_PATH`. El componente `src/components/layout/Logo.tsx` dibuja el mismo isotipo en
+línea (sin peticiones extra) y `Brand.tsx` lo acompaña del wordmark y el tagline.
 
 ### 5. Base de datos (SQL)
 
@@ -179,7 +201,8 @@ src/
 ├─ components/
 │  ├─ layout/AppLayout.tsx       sidebar fija (lg+) + drawer móvil + header
 │  ├─ layout/ConnectionStatus.tsx indicador PWA en línea / sin conexión
-│  ├─ layout/Brand.tsx           logotipo reutilizado en login y nav
+│  ├─ layout/Logo.tsx            isotipo vectorial (diente + monograma AD) reutilizable
+│  ├─ layout/Brand.tsx           logotipo completo (isotipo + wordmark) para login y nav
 │  ├─ layout/nav-items.ts        definición de las secciones del menú
 │  └─ ui/                        Modal, FullScreenLoader, ComingSoon
 ├─ hooks/useOnlineStatus.ts      eventos online/offline del navegador

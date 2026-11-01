@@ -52,7 +52,7 @@ export function TreatmentsToolbar({
               onChange={(event) => onQueryChange(event.target.value)}
               placeholder="Buscar por nombre, código o categoría…"
               autoComplete="off"
-              className="w-full rounded-xl border border-slate-300 bg-white py-2.5 pl-9 pr-9 text-sm text-slate-900 shadow-sm transition-colors placeholder:text-slate-400 focus:border-brand-500 sm:w-80"
+              className="w-full rounded-xl border border-slate-300 bg-white/85 py-2.5 pl-9 pr-9 text-sm text-slate-900 shadow-sm transition-colors placeholder:text-slate-400 focus:border-brand-500 sm:w-80"
             />
             {query && (
               <button
@@ -83,7 +83,7 @@ export function TreatmentsToolbar({
                   className={[
                     'inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors sm:text-sm',
                     isActive
-                      ? 'bg-white text-slate-900 shadow-sm ring-1 ring-slate-200'
+                      ? 'bg-white/85 text-slate-900 shadow-sm ring-1 ring-slate-200'
                       : 'text-slate-500 hover:text-slate-800',
                   ].join(' ')}
                 >
@@ -105,7 +105,7 @@ export function TreatmentsToolbar({
         <button
           type="button"
           onClick={onCreate}
-          className="inline-flex items-center justify-center gap-2 rounded-xl bg-brand-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-brand-700"
+          className="inline-flex items-center justify-center gap-2 rounded-xl bg-brand-500 px-4 py-2.5 text-sm font-semibold text-ink-950 shadow-sm shadow-brand-500/30 ring-1 ring-brand-600/25 transition-colors hover:bg-brand-400"
         >
           <Plus className="size-4" aria-hidden="true" />
           Nuevo tratamiento
@@ -130,7 +130,7 @@ export function TreatmentsToolbar({
                 'inline-flex shrink-0 items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-colors',
                 isActive
                   ? 'border-brand-300 bg-brand-50 text-brand-800'
-                  : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:text-slate-900',
+                  : 'border-slate-200/80 bg-white/85 text-slate-600 hover:border-slate-300 hover:text-slate-900',
               ].join(' ')}
             >
               {filter.label}

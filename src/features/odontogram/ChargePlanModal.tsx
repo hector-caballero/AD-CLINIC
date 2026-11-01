@@ -26,7 +26,7 @@ import {
 } from './odontogram-types'
 
 const INPUT_CLASS =
-  'w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 shadow-sm transition-colors placeholder:text-slate-400 focus:border-brand-500'
+  'w-full rounded-xl border border-slate-300 bg-white/85 px-3 py-2.5 text-sm text-slate-900 shadow-sm transition-colors placeholder:text-slate-400 focus:border-brand-500'
 
 const LABEL_CLASS = 'mb-1 block text-sm font-medium text-slate-700'
 
@@ -214,7 +214,7 @@ export function ChargePlanModal({
               type="button"
               onClick={onClose}
               disabled={isSaving}
-              className="rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50 disabled:opacity-60"
+              className="rounded-xl border border-slate-300 bg-white/85 px-4 py-2.5 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50 disabled:opacity-60"
             >
               Cancelar
             </button>
@@ -222,7 +222,7 @@ export function ChargePlanModal({
               type="submit"
               form="plan-charge-form"
               disabled={isSaving || selectedItems.length === 0}
-              className="inline-flex items-center justify-center gap-2 rounded-xl bg-brand-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-70"
+              className="inline-flex items-center justify-center gap-2 rounded-xl bg-brand-500 px-4 py-2.5 text-sm font-semibold text-ink-950 shadow-sm shadow-brand-500/30 ring-1 ring-brand-600/25 transition-colors hover:bg-brand-400 disabled:cursor-not-allowed disabled:opacity-70"
             >
               {isSaving && <Loader2 className="size-4 animate-spin" aria-hidden="true" />}
               {isSaving
@@ -344,7 +344,7 @@ export function ChargePlanModal({
                 'rounded-xl border px-3 py-2.5 text-left transition-colors disabled:opacity-60',
                 collected
                   ? 'border-brand-500 bg-brand-50/70 ring-1 ring-brand-200'
-                  : 'border-slate-300 bg-white hover:bg-slate-50',
+                  : 'border-slate-300 bg-white/85 hover:bg-slate-50',
               ].join(' ')}
             >
               <span className="flex items-center gap-1.5 text-sm font-semibold text-slate-900">
@@ -365,7 +365,7 @@ export function ChargePlanModal({
                 'rounded-xl border px-3 py-2.5 text-left transition-colors disabled:opacity-60',
                 !collected
                   ? 'border-brand-500 bg-brand-50/70 ring-1 ring-brand-200'
-                  : 'border-slate-300 bg-white hover:bg-slate-50',
+                  : 'border-slate-300 bg-white/85 hover:bg-slate-50',
               ].join(' ')}
             >
               <span className="flex items-center gap-1.5 text-sm font-semibold text-slate-900">
@@ -400,7 +400,7 @@ export function ChargePlanModal({
                       'inline-flex items-center gap-1.5 rounded-xl border px-2.5 py-2 text-xs font-medium transition-colors disabled:opacity-60',
                       isActive
                         ? 'border-brand-500 bg-brand-50 text-brand-700 ring-1 ring-brand-200'
-                        : 'border-slate-300 bg-white text-slate-600 hover:bg-slate-50',
+                        : 'border-slate-300 bg-white/85 text-slate-600 hover:bg-slate-50',
                     ].join(' ')}
                   >
                     <Icon className="size-3.5" aria-hidden="true" />

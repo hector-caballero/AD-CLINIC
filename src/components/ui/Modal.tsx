@@ -136,7 +136,7 @@ export function Modal({
         onClick={() => {
           if (!isBusy) onClose()
         }}
-        className="absolute inset-0 h-full w-full cursor-default bg-slate-900/50 backdrop-blur-sm"
+        className="absolute inset-0 h-full w-full cursor-default bg-ink-950/35 backdrop-blur-sm"
       />
 
       <div
@@ -147,11 +147,11 @@ export function Modal({
         aria-describedby={description ? descriptionId : undefined}
         tabIndex={-1}
         className={[
-          'relative flex h-[100dvh] w-full flex-col overflow-hidden border-slate-200 bg-white shadow-2xl sm:h-auto sm:max-h-[90dvh] sm:rounded-2xl sm:border',
+          'relative flex h-[100dvh] w-full flex-col overflow-hidden border-slate-200/80 bg-white/95 shadow-panel backdrop-blur-xl sm:h-auto sm:max-h-[90dvh] sm:rounded-2xl sm:border',
           SIZE_CLASSES[size],
         ].join(' ')}
       >
-        <header className="flex shrink-0 items-start justify-between gap-3 border-b border-slate-200 px-5 py-4">
+        <header className="flex shrink-0 items-start justify-between gap-3 border-b border-slate-200/70 px-5 py-4">
           <div className="min-w-0">
             <h2 id={titleId} className="text-base font-semibold tracking-tight text-slate-900">
               {title}
@@ -176,7 +176,7 @@ export function Modal({
         <div className={`flex-1 overflow-y-auto px-5 py-5 ${bodyClassName}`}>{children}</div>
 
         {footer && (
-          <footer className="shrink-0 border-t border-slate-200 bg-slate-50 px-5 py-3">
+          <footer className="shrink-0 border-t border-slate-200/70 bg-brand-50/50 px-5 py-3">
             {footer}
           </footer>
         )}

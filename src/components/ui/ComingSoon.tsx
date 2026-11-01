@@ -9,7 +9,7 @@ type ComingSoonProps = {
 /** Marcador de posición para los módulos que se construirán en las próximas fases. */
 export function ComingSoon({ title, description, bullets = [] }: ComingSoonProps) {
   return (
-    <section className="rounded-2xl border border-dashed border-slate-300 bg-white px-6 py-12 text-center">
+    <section className="rounded-2xl border border-dashed border-slate-300 bg-white/85 px-6 py-12 text-center">
       <span className="mx-auto flex size-12 items-center justify-center rounded-2xl bg-brand-50 text-brand-600">
         <Sparkles className="size-6" aria-hidden="true" />
       </span>

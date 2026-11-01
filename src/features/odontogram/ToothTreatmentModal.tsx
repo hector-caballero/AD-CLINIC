@@ -20,7 +20,7 @@ import {
 } from './odontogram-types'
 
 const INPUT_CLASS =
-  'w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 shadow-sm transition-colors placeholder:text-slate-400 focus:border-brand-500'
+  'w-full rounded-xl border border-slate-300 bg-white/85 px-3 py-2.5 text-sm text-slate-900 shadow-sm transition-colors placeholder:text-slate-400 focus:border-brand-500'
 
 const LABEL_CLASS = 'mb-1 block text-sm font-medium text-slate-700'
 
@@ -145,7 +145,7 @@ export function ToothTreatmentModal({
             type="button"
             onClick={onClose}
             disabled={isSaving}
-            className="inline-flex items-center justify-center rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 shadow-sm transition-colors hover:bg-slate-50 disabled:opacity-50"
+            className="inline-flex items-center justify-center rounded-xl border border-slate-300 bg-white/85 px-4 py-2.5 text-sm font-medium text-slate-700 shadow-sm transition-colors hover:bg-slate-50 disabled:opacity-50"
           >
             Cancelar
           </button>
@@ -153,7 +153,7 @@ export function ToothTreatmentModal({
             type="submit"
             form="tooth-treatment-form"
             disabled={isSaving || (isAbsent && Boolean(absentItem))}
-            className="inline-flex items-center justify-center gap-2 rounded-xl bg-brand-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-70"
+            className="inline-flex items-center justify-center gap-2 rounded-xl bg-brand-500 px-4 py-2.5 text-sm font-semibold text-ink-950 shadow-sm shadow-brand-500/30 ring-1 ring-brand-600/25 transition-colors hover:bg-brand-400 disabled:cursor-not-allowed disabled:opacity-70"
           >
             {isSaving && <Loader2 className="size-4 animate-spin" aria-hidden="true" />}
             {isSaving ? 'Guardando…' : isAbsent ? 'Marcar pieza ausente' : 'Guardar en la pieza'}
@@ -181,7 +181,7 @@ export function ToothTreatmentModal({
                     'flex items-start gap-2 rounded-xl border px-3 py-2 text-left transition-colors',
                     isActive
                       ? 'border-brand-500 bg-brand-50/60 ring-1 ring-brand-200'
-                      : 'border-slate-200 bg-white hover:bg-slate-50',
+                      : 'border-slate-200/80 bg-white/85 hover:bg-slate-50',
                   ].join(' ')}
                 >
                   <span

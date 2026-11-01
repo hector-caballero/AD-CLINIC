@@ -1,35 +1,96 @@
 @import 'tailwindcss';
 
 /*
- * Tokens de marca de AD Clinic.
- * Se exponen como utilidades de Tailwind: bg-brand-600, text-brand-700, etc.
+ * Identidad visual de AD Clinic.
+ *
+ * Paleta: blanco marfil de fondo, superficies claras translúcidas y acentos en
+ * dorado champaña (#D4AF37) y bronce cálido (#9A7B56). Los neutros (`slate`)
+ * se redefinen con una rampa cálida para que toda la interfaz acompañe al
+ * logotipo sin tener que tocar cada componente.
+ *
+ * Se exponen como utilidades de Tailwind: bg-brand-500, text-bronze-700, etc.
  */
 @theme {
-  --color-brand-50: #ecfeff;
-  --color-brand-100: #cffafe;
-  --color-brand-200: #a5f3fc;
-  --color-brand-300: #67e8f9;
-  --color-brand-400: #22d3ee;
-  --color-brand-500: #06b6d4;
-  --color-brand-600: #0891b2;
-  --color-brand-700: #0e7490;
-  --color-brand-800: #155e75;
-  --color-brand-900: #0c4a6e;
-  --color-brand-950: #082f49;
+  /* Dorado champaña: acentos, botones primarios y estados activos. */
+  --color-brand-50: #fbf6e9;
+  --color-brand-100: #f6ebce;
+  --color-brand-200: #eeda9f;
+  --color-brand-300: #e4c671;
+  --color-brand-400: #dbb852;
+  --color-brand-500: #d4af37;
+  --color-brand-600: #b8932b;
+  --color-brand-700: #967424;
+  --color-brand-800: #71571f;
+  --color-brand-900: #4b3a18;
+  --color-brand-950: #2b2110;
+
+  /* Bronce cálido: textos secundarios, detalles y acentos profundos. */
+  --color-bronze-50: #fbf6f0;
+  --color-bronze-100: #f3e9dd;
+  --color-bronze-200: #e5d3bf;
+  --color-bronze-300: #d2b79a;
+  --color-bronze-400: #b99575;
+  --color-bronze-500: #9a7b56;
+  --color-bronze-600: #836547;
+  --color-bronze-700: #684f37;
+  --color-bronze-800: #4e3b29;
+  --color-bronze-900: #35281c;
+
+  /*
+   * Neutros cálidos. Mantener los 11 pasos permite que los componentes
+   * existentes (text-slate-500, border-slate-200…) hereden el tono marfil
+   * sin cambios. `slate-900` es exactamente el gris carbón de marca.
+   */
+  --color-slate-50: #f8f6f2;
+  --color-slate-100: #f2eee7;
+  --color-slate-200: #e7e1d6;
+  --color-slate-300: #d7cfc0;
+  --color-slate-400: #ada394;
+  --color-slate-500: #8a8175;
+  --color-slate-600: #6e665b;
+  --color-slate-700: #554f47;
+  --color-slate-800: #3b3733;
+  --color-slate-900: #2a2724;
+  --color-slate-950: #1d1b19;
+
+  /* Tinta: texto sobre superficies doradas. */
+  --color-ink-700: #3d3833;
+  --color-ink-800: #332f2b;
+  --color-ink-900: #2a2724;
+  --color-ink-950: #241f1b;
+
+  /* Lienzo y superficies. */
+  --color-canvas: #fcfbf9;
+  --color-canvas-warm: #faf8f5;
+  --color-surface: rgb(255 255 255 / 0.85);
+
+  /* Sombras suaves y cálidas (nunca negro puro). */
+  --shadow-sm: 0 1px 2px rgb(42 39 36 / 0.05), 0 12px 24px -22px rgb(42 39 36 / 0.35);
+  --shadow-card: 0 1px 2px rgb(42 39 36 / 0.04), 0 18px 36px -26px rgb(42 39 36 / 0.25);
+  --shadow-panel: 0 1px 2px rgb(42 39 36 / 0.05), 0 32px 64px -34px rgb(42 39 36 / 0.3);
+  --shadow-gold: 0 10px 24px -14px rgb(212 175 55 / 0.55);
 
   --font-sans: system-ui, 'Segoe UI', Roboto, sans-serif;
+  /* Serif editorial para el logotipo y los titulares de marca. */
+  --font-display: Georgia, 'Iowan Old Style', 'Palatino Linotype', 'Times New Roman', serif;
 }
 
 @layer base {
   html {
     color-scheme: light;
+    -webkit-tap-highlight-color: transparent;
   }
 
   body {
     margin: 0;
     min-height: 100svh;
-    background-color: #f8fafc;
-    color: #1e293b;
+    background-color: var(--color-canvas);
+    /* Velo dorado muy tenue: da profundidad al marfil sin oscurecerlo. */
+    background-image:
+      radial-gradient(52rem 34rem at 10% -12%, rgb(212 175 55 / 0.09), transparent 62%),
+      radial-gradient(44rem 32rem at 100% 0%, rgb(154 123 86 / 0.07), transparent 58%);
+    background-attachment: fixed;
+    color: var(--color-ink-900);
     font-family: var(--font-sans);
     font-synthesis: none;
     text-rendering: optimizeLegibility;
@@ -41,9 +102,15 @@
     min-height: 100svh;
   }
 
+  ::selection {
+    background-color: #f1e2b6;
+    color: var(--color-ink-900);
+  }
+
   /* Foco visible y consistente en toda la app (accesibilidad con teclado). */
   :focus-visible {
-    outline: 2px solid #0891b2;
+    outline: 2px solid var(--color-brand-600);
     outline-offset: 2px;
   }
 }
+

@@ -51,14 +51,14 @@ export function PatientAccountModal({
           <button
             type="button"
             onClick={onClose}
-            className="inline-flex items-center justify-center rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 shadow-sm transition-colors hover:bg-slate-50"
+            className="inline-flex items-center justify-center rounded-xl border border-slate-300 bg-white/85 px-4 py-2.5 text-sm font-medium text-slate-700 shadow-sm transition-colors hover:bg-slate-50"
           >
             Cerrar
           </button>
           <button
             type="button"
             onClick={() => onCharge(patientId)}
-            className="inline-flex items-center justify-center gap-2 rounded-xl bg-brand-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-brand-700"
+            className="inline-flex items-center justify-center gap-2 rounded-xl bg-brand-500 px-4 py-2.5 text-sm font-semibold text-ink-950 shadow-sm shadow-brand-500/30 ring-1 ring-brand-600/25 transition-colors hover:bg-brand-400"
           >
             <HandCoins className="size-4" aria-hidden="true" />
             Registrar cobro
@@ -79,7 +79,7 @@ export function PatientAccountModal({
             <button
               type="button"
               onClick={reload}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-red-200 bg-white px-2.5 py-1 text-xs font-medium text-red-700 transition-colors hover:bg-red-100"
+              className="inline-flex items-center gap-1.5 rounded-lg border border-red-200 bg-white/85 px-2.5 py-1 text-xs font-medium text-red-700 transition-colors hover:bg-red-100"
             >
               <RefreshCw className="size-3.5" aria-hidden="true" />
               Reintentar
@@ -141,7 +141,7 @@ export function PatientAccountModal({
             ].map((item) => (
               <div
                 key={item.label}
-                className="rounded-xl border border-slate-200 bg-white px-3 py-2"
+                className="rounded-xl border border-slate-200 bg-white/85 px-3 py-2"
               >
                 <dt className="text-xs text-slate-500">{item.label}</dt>
                 <dd className="mt-0.5 font-semibold tabular-nums text-slate-900">

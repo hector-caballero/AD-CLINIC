@@ -69,7 +69,7 @@ export function CancelAppointmentDialog({
             type="button"
             onClick={onClose}
             disabled={isBusy}
-            className="inline-flex items-center justify-center rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 shadow-sm transition-colors hover:bg-slate-50 disabled:opacity-50"
+            className="inline-flex items-center justify-center rounded-xl border border-slate-300 bg-white/85 px-4 py-2.5 text-sm font-medium text-slate-700 shadow-sm transition-colors hover:bg-slate-50 disabled:opacity-50"
           >
             Volver
           </button>
@@ -111,7 +111,7 @@ export function CancelAppointmentDialog({
             }}
             placeholder="Ej.: el paciente avisó que no puede asistir."
             disabled={isBusy}
-            className="w-full resize-y rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 shadow-sm transition-colors placeholder:text-slate-400 focus:border-brand-500"
+            className="w-full resize-y rounded-xl border border-slate-300 bg-white/85 px-3 py-2.5 text-sm text-slate-900 shadow-sm transition-colors placeholder:text-slate-400 focus:border-brand-500"
           />
           <p className="mt-1 text-right text-[11px] tabular-nums text-slate-400">
             {reason.length}/200

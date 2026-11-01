@@ -189,7 +189,7 @@ export function MovementsTable({ movements, onOpenAccount }: MovementsTableProps
                       onClick={() => onOpenAccount(movement.patient_id)}
                       aria-label={`Ver el estado de cuenta de ${patientName}`}
                       title="Estado de cuenta"
-                      className="rounded-lg border border-slate-300 bg-white p-1.5 text-slate-500 transition-colors hover:bg-slate-50 hover:text-brand-700"
+                      className="rounded-lg border border-slate-300 bg-white/85 p-1.5 text-slate-500 transition-colors hover:bg-slate-50 hover:text-brand-700"
                     >
                       <Wallet className="size-4" aria-hidden="true" />
                     </button>
@@ -241,7 +241,7 @@ export function MovementsTable({ movements, onOpenAccount }: MovementsTableProps
                   type="button"
                   onClick={() => onOpenAccount(movement.patient_id)}
                   aria-label={`Ver el estado de cuenta de ${patientName}`}
-                  className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-2.5 py-1 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-50"
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white/85 px-2.5 py-1 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-50"
                 >
                   <Wallet className="size-3.5" aria-hidden="true" />
                   Estado de cuenta

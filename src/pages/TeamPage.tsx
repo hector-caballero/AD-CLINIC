@@ -30,10 +30,10 @@ type FormState = { mode: 'create' } | { mode: 'edit'; member: TeamMember } | nul
 type Notice = { tone: 'success' | 'warning' | 'error'; message: string }
 
 const PRIMARY_BUTTON_CLASS =
-  'inline-flex items-center justify-center gap-2 rounded-xl bg-brand-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-brand-700'
+  'inline-flex items-center justify-center gap-2 rounded-xl bg-brand-500 px-4 py-2.5 text-sm font-semibold text-ink-950 shadow-sm shadow-brand-500/30 ring-1 ring-brand-600/25 transition-colors hover:bg-brand-400'
 
 const SECONDARY_BUTTON_CLASS =
-  'inline-flex items-center justify-center rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 shadow-sm transition-colors hover:bg-slate-50'
+  'inline-flex items-center justify-center rounded-xl border border-slate-300 bg-white/85 px-4 py-2.5 text-sm font-medium text-slate-700 shadow-sm transition-colors hover:bg-slate-50'
 
 const NOTICE_CLASS: Record<Notice['tone'], string> = {
   success: 'border-emerald-100 bg-emerald-50 text-emerald-800',
@@ -53,7 +53,7 @@ function SummaryCard({
   icon: typeof Users
 }) {
   return (
-    <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+    <div className="rounded-2xl border border-slate-200/80 bg-white/85 p-4 shadow-card backdrop-blur-md">
       <div className="flex items-center gap-2 text-slate-500">
         <Icon className="size-4" aria-hidden="true" />
         <p className="text-xs font-semibold uppercase tracking-wide">{label}</p>
@@ -220,7 +220,7 @@ export default function TeamPage() {
       <section
         aria-label="Usuarios del consultorio"
         aria-busy={isLoading}
-        className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm"
+        className="overflow-hidden rounded-2xl border border-slate-200/80 bg-white/85 shadow-card backdrop-blur-md"
       >
         <div className="border-b border-slate-200 px-4 py-4 sm:px-5">
           <TeamToolbar

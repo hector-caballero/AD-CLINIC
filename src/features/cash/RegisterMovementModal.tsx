@@ -58,7 +58,7 @@ type RegisterMovementModalProps = {
 type MovementKind = 'charge' | 'payment'
 
 const INPUT_CLASS =
-  'w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 shadow-sm transition-colors placeholder:text-slate-400 focus:border-brand-500'
+  'w-full rounded-xl border border-slate-300 bg-white/85 px-3 py-2.5 text-sm text-slate-900 shadow-sm transition-colors placeholder:text-slate-400 focus:border-brand-500'
 
 const LABEL_CLASS = 'mb-1 block text-sm font-medium text-slate-700'
 
@@ -298,7 +298,7 @@ export function RegisterMovementModal({
               type="button"
               onClick={onClose}
               disabled={isSaving}
-              className="inline-flex items-center justify-center rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 shadow-sm transition-colors hover:bg-slate-50 disabled:opacity-50"
+              className="inline-flex items-center justify-center rounded-xl border border-slate-300 bg-white/85 px-4 py-2.5 text-sm font-medium text-slate-700 shadow-sm transition-colors hover:bg-slate-50 disabled:opacity-50"
             >
               Cancelar
             </button>
@@ -306,7 +306,7 @@ export function RegisterMovementModal({
               type="submit"
               form="cash-movement-form"
               disabled={isSaving}
-              className="inline-flex items-center justify-center gap-2 rounded-xl bg-brand-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-70"
+              className="inline-flex items-center justify-center gap-2 rounded-xl bg-brand-500 px-4 py-2.5 text-sm font-semibold text-ink-950 shadow-sm shadow-brand-500/30 ring-1 ring-brand-600/25 transition-colors hover:bg-brand-400 disabled:cursor-not-allowed disabled:opacity-70"
             >
               {isSaving && <Loader2 className="size-4 animate-spin" aria-hidden="true" />}
               {isSaving ? 'Guardando…' : submitLabel}
@@ -357,7 +357,7 @@ export function RegisterMovementModal({
                   setSubmitError(null)
                 }}
                 disabled={isSaving}
-                className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-slate-300 bg-white px-2.5 py-1 text-xs font-medium text-slate-600 transition-colors hover:bg-slate-100 disabled:opacity-50"
+                className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-slate-300 bg-white/85 px-2.5 py-1 text-xs font-medium text-slate-600 transition-colors hover:bg-slate-100 disabled:opacity-50"
               >
                 <X className="size-3.5" aria-hidden="true" />
                 Cambiar
@@ -398,13 +398,13 @@ export function RegisterMovementModal({
                     'flex items-start gap-2.5 rounded-xl border px-3 py-2.5 text-left transition-colors disabled:opacity-60',
                     isActive
                       ? 'border-brand-500 bg-brand-50/70 ring-1 ring-brand-200'
-                      : 'border-slate-300 bg-white hover:bg-slate-50',
+                      : 'border-slate-300 bg-white/85 hover:bg-slate-50',
                   ].join(' ')}
                 >
                   <span
                     className={[
                       'mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg',
-                      isActive ? 'bg-brand-600 text-white' : 'bg-slate-100 text-slate-500',
+                      isActive ? 'bg-brand-500 text-ink-950 shadow-sm ring-1 ring-brand-600/25' : 'bg-slate-100 text-slate-500',
                     ].join(' ')}
                   >
                     <Icon className="size-4" aria-hidden="true" />
@@ -445,7 +445,7 @@ export function RegisterMovementModal({
                 <button
                   type="button"
                   onClick={reloadCatalog}
-                  className="mt-2 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-50"
+                  className="mt-2 rounded-lg border border-slate-300 bg-white/85 px-3 py-1.5 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-50"
                 >
                   Reintentar
                 </button>
@@ -483,7 +483,7 @@ export function RegisterMovementModal({
                       </div>
 
                       <div className="flex items-center gap-2">
-                        <div className="inline-flex items-center rounded-lg border border-slate-300 bg-white">
+                        <div className="inline-flex items-center rounded-lg border border-slate-300 bg-white/85">
                           <button
                             type="button"
                             onClick={() => changeQuantity(item.treatmentId, -1)}
@@ -561,7 +561,7 @@ export function RegisterMovementModal({
                   type="button"
                   onClick={() => setAmountInput(formatAmountInput(String(Math.round(currentBalance))))}
                   disabled={isSaving}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 rounded-lg border border-slate-300 bg-white px-2 py-1 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-50 disabled:opacity-50"
+                  className="absolute right-2 top-1/2 -translate-y-1/2 rounded-lg border border-slate-300 bg-white/85 px-2 py-1 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-50 disabled:opacity-50"
                 >
                   Usar saldo
                 </button>
@@ -603,7 +603,7 @@ export function RegisterMovementModal({
                   'rounded-xl border px-3 py-2.5 text-left transition-colors disabled:opacity-60',
                   collected
                     ? 'border-brand-500 bg-brand-50/70 ring-1 ring-brand-200'
-                    : 'border-slate-300 bg-white hover:bg-slate-50',
+                    : 'border-slate-300 bg-white/85 hover:bg-slate-50',
                 ].join(' ')}
               >
                 <span className="flex items-center gap-1.5 text-sm font-semibold text-slate-900">
@@ -624,7 +624,7 @@ export function RegisterMovementModal({
                   'rounded-xl border px-3 py-2.5 text-left transition-colors disabled:opacity-60',
                   !collected
                     ? 'border-brand-500 bg-brand-50/70 ring-1 ring-brand-200'
-                    : 'border-slate-300 bg-white hover:bg-slate-50',
+                    : 'border-slate-300 bg-white/85 hover:bg-slate-50',
                 ].join(' ')}
               >
                 <span className="flex items-center gap-1.5 text-sm font-semibold text-slate-900">
@@ -659,7 +659,7 @@ export function RegisterMovementModal({
                       'inline-flex items-center gap-1.5 rounded-xl border px-2.5 py-2 text-xs font-medium transition-colors disabled:opacity-60',
                       isActive
                         ? 'border-brand-500 bg-brand-50 text-brand-700 ring-1 ring-brand-200'
-                        : 'border-slate-300 bg-white text-slate-600 hover:bg-slate-50',
+                        : 'border-slate-300 bg-white/85 text-slate-600 hover:bg-slate-50',
                     ].join(' ')}
                   >
                     <Icon className="size-3.5" aria-hidden="true" />
@@ -837,8 +837,8 @@ function TreatmentSelector({
                             className={[
                               'mt-0.5 flex size-4 shrink-0 items-center justify-center rounded border',
                               isSelected
-                                ? 'border-brand-600 bg-brand-600 text-white'
-                                : 'border-slate-300 bg-white',
+                                ? 'border-brand-600 bg-brand-500 text-ink-950'
+                                : 'border-slate-300 bg-white/85',
                             ].join(' ')}
                           >
                             {isSelected && <Check className="size-3" aria-hidden="true" />}

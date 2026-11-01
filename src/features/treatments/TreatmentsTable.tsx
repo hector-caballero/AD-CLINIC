@@ -44,7 +44,7 @@ function ToggleActiveButton({
       className={[
         'inline-flex items-center justify-center gap-1.5 rounded-lg transition-colors disabled:cursor-wait disabled:opacity-60',
         withLabel
-          ? 'border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50'
+          ? 'border border-slate-300 bg-white/85 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50'
           : treatment.is_active
             ? 'p-2 text-slate-400 hover:bg-amber-50 hover:text-amber-700'
             : 'p-2 text-slate-400 hover:bg-emerald-50 hover:text-emerald-700',
@@ -117,7 +117,7 @@ export function TreatmentsTable({
                   className="px-4 py-2 text-xs font-semibold uppercase tracking-wider text-slate-500"
                 >
                   {group.label}
-                  <span className="ml-2 rounded-full bg-white px-1.5 py-0.5 text-[10px] font-semibold text-slate-500 ring-1 ring-slate-200">
+                  <span className="ml-2 rounded-full bg-white/85 px-1.5 py-0.5 text-[10px] font-semibold text-slate-500 ring-1 ring-slate-200">
                     {group.treatments.length}
                   </span>
                 </th>
@@ -186,7 +186,7 @@ export function TreatmentsTable({
           <section key={group.category}>
             <h3 className="flex items-center gap-2 bg-slate-50 px-4 py-2 text-xs font-semibold uppercase tracking-wider text-slate-500">
               {group.label}
-              <span className="rounded-full bg-white px-1.5 py-0.5 text-[10px] font-semibold text-slate-500 ring-1 ring-slate-200">
+              <span className="rounded-full bg-white/85 px-1.5 py-0.5 text-[10px] font-semibold text-slate-500 ring-1 ring-slate-200">
                 {group.treatments.length}
               </span>
             </h3>
@@ -232,7 +232,7 @@ export function TreatmentsTable({
                     <button
                       type="button"
                       onClick={() => onEdit(treatment)}
-                      className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-50"
+                      className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-slate-300 bg-white/85 px-3 py-1.5 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-50"
                     >
                       <Pencil className="size-3.5" aria-hidden="true" />
                       Editar
