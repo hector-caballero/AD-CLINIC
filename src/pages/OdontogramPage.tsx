@@ -8,8 +8,11 @@ import { patientContactLabel } from '../features/patients/patient-contact'
 import { getPatientFullName, type Patient } from '../features/patients/patient-types'
 import { usePatients } from '../features/patients/usePatients'
 import { OdontogramChart } from '../features/odontogram/OdontogramChart'
+import { ChargePlanModal, type PlanChargeSubmission } from '../features/odontogram/ChargePlanModal'
 import { ToothTreatmentModal } from '../features/odontogram/ToothTreatmentModal'
 import { TreatmentBudgetPanel } from '../features/odontogram/TreatmentBudgetPanel'
+import { registerTreatmentCharge } from '../features/cash/cash-service'
+import type { BilledItemLink } from '../features/odontogram/odontogram-service'
 import { DENTITION_OPTIONS } from '../features/odontogram/odontogram-teeth'
 import {
   ITEM_STATUS_META,
@@ -23,7 +26,7 @@ import {
   type ToothSurface,
 } from '../features/odontogram/odontogram-types'
 import { useOdontogram } from '../features/odontogram/useOdontogram'
-import { getInitials } from '../lib/format'
+import { getInitials, formatPYG } from '../lib/format'
 
 const SECONDARY_BUTTON_CLASS =
   'inline-flex items-center justify-center gap-2 rounded-xl border border-slate-300 bg-white px-3.5 py-2 text-sm font-medium text-slate-700 shadow-sm transition-colors hover:bg-slate-50'
@@ -52,6 +55,7 @@ export default function OdontogramPage() {
   const [isPicking, setIsPicking] = useState(false)
   const [notice, setNotice] = useState<Notice | null>(null)
   const [busyItemId, setBusyItemId] = useState<string | null>(null)
+  const [isChargingPlan, setIsChargingPlan] = useState(false)
 
   const {
     patients,
@@ -159,6 +163,66 @@ export default function OdontogramPage() {
     } finally {
       setBusyItemId(null)
     }
+  }
+
+  /**
+   * «Cobrar este plan»: manda las líneas elegidas por el mismo flujo de caja que
+   * un cobro de tratamiento y luego las enlaza al cargo creado.
+   *
+   * El cobro ocurre primero: si el enlace falla, se recarga el odontograma y se
+   * avisa para revisar la caja antes de reintentar (así no se cobra dos veces).
+   */
+  async function handleChargePlan(submission: PlanChargeSubmission) {
+    if (!patient) return
+
+    const result = await registerTreatmentCharge({
+      patientId: patient.id,
+      items: submission.lines.map((line) => ({
+        treatmentId: line.treatmentId,
+        quantity: line.quantity,
+        unitPrice: line.unitPrice,
+        toothNumber: line.toothNumber,
+        surface: line.surface,
+      })),
+      collected: submission.collected,
+      method: submission.method,
+      receiptNumber: submission.receiptNumber,
+      notes: submission.notes,
+    })
+
+    const treatmentIds = result.treatmentIds ?? []
+    const links: BilledItemLink[] = []
+
+    submission.lines.forEach((line, index) => {
+      const patientTreatmentId = treatmentIds[index]
+
+      if (patientTreatmentId) links.push({ itemId: line.itemId, patientTreatmentId })
+    })
+
+    try {
+      if (links.length !== submission.lines.length) {
+        throw new Error('La caja no devolvió todos los tratamientos registrados.')
+      }
+
+      await odontogram.markBilled(links)
+    } catch {
+      await odontogram.reload()
+      setIsChargingPlan(false)
+      setNotice({
+        tone: 'error',
+        message: `El cobro de ${formatPYG(result.total)} quedó registrado en caja, pero no se pudieron marcar todas las piezas. Revisá el movimiento en Caja antes de volver a cobrar.`,
+      })
+
+      return
+    }
+
+    setIsChargingPlan(false)
+    setNotice({
+      tone: 'success',
+      message: submission.collected
+        ? `Cobro de ${formatPYG(result.total)} registrado en caja.`
+        : `Cargo de ${formatPYG(result.total)} enviado a la cuenta del paciente.`,
+    })
   }
 
   const patientName = patient ? getPatientFullName(patient) : ''
@@ -348,6 +412,7 @@ export default function OdontogramPage() {
               onRetry={odontogram.reload}
               onChangeStatus={handleChangeStatus}
               onRemove={handleRemove}
+              onChargePlan={() => setIsChargingPlan(true)}
             />
           </div>
 
@@ -385,6 +450,15 @@ export default function OdontogramPage() {
           initialStatus={selectionIsAbsent ? 'absent' : 'budgeted'}
           onClose={() => setSelection(null)}
           onSubmit={handleSaveDraft}
+        />
+      )}
+
+      {isChargingPlan && patient && (
+        <ChargePlanModal
+          patientName={patientName}
+          items={odontogram.items}
+          onClose={() => setIsChargingPlan(false)}
+          onSubmit={handleChargePlan}
         />
       )}
     </div>

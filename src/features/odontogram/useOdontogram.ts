@@ -2,8 +2,10 @@ import { useCallback, useEffect, useState } from 'react'
 import {
   addOdontogramItem,
   fetchOdontogram,
+  markOdontogramItemsBilled,
   removeOdontogramItem,
   setOdontogramItemStatus,
+  type BilledItemLink,
 } from './odontogram-service'
 import type { Dentition, OdontogramDraft, OdontogramItem } from './odontogram-types'
 
@@ -114,6 +116,20 @@ export function useOdontogram(patientId: string | null, dentition: Dentition) {
     [applyItems],
   )
 
+  /** Enlaza las líneas recién cobradas en caja y las deja como realizadas. */
+  const markBilled = useCallback(
+    async (links: BilledItemLink[]) => {
+      const updated = await markOdontogramItemsBilled(links)
+
+      applyItems((current) =>
+        current.map((row) => updated.find((item) => item.id === row.id) ?? row),
+      )
+
+      return updated
+    },
+    [applyItems],
+  )
+
   return {
     items,
     isLoading,
@@ -122,6 +138,7 @@ export function useOdontogram(patientId: string | null, dentition: Dentition) {
     saveItem,
     changeStatus,
     removeItem,
+    markBilled,
   }
 }
 

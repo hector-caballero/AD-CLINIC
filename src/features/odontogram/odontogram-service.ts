@@ -23,6 +23,9 @@ import {
  *   existe, se actualiza (cantidad, precio, estado y notas).
  * - El precio viaja en guaraníes y se redondea; lo que no tiene precio es
  *   únicamente la marca de pieza ausente.
+ * - Una línea con `patient_treatment_id` ya se cobró en caja: no se vuelve a
+ *   cobrar, no cambia de estado y no se quita del odontograma (el ajuste se
+ *   hace desde la caja).
  * - La validación fina (FDI según dentición, `performed_at`, RLS) vive en la
  *   base; acá solo se evitan errores obvios antes de viajar.
  */
@@ -50,6 +53,7 @@ type RawItem = {
   total_price: unknown
   notes: string | null
   performed_at: string | null
+  patient_treatment_id: string | null
   created_at: string
   updated_at: string
   treatment: RawTreatment | RawTreatment[] | null
@@ -232,6 +236,12 @@ export async function addOdontogramItem(input: OdontogramItemInput): Promise<Odo
   const odontogram = await ensureOdontogram(input.patientId, input.dentition)
   const existing = await findExistingItem(odontogram.id, input.toothNumber, surface, treatmentId)
 
+  if (existing?.patient_treatment_id) {
+    throw new Error(
+      `La pieza ${input.toothNumber} ya tiene este procedimiento cobrado en caja. Para cambiarlo, ajustá el movimiento desde Caja.`,
+    )
+  }
+
   const performedAt =
     input.status === 'completed'
       ? (existing?.performed_at ?? new Date().toISOString())
@@ -280,6 +290,8 @@ export async function setOdontogramItemStatus(
   itemId: string,
   status: OdontogramItemStatus,
 ): Promise<OdontogramItem> {
+  await assertItemNotBilled(itemId)
+
   const patch: OdontogramItemPatch = { status }
 
   if (status === 'absent') {
@@ -306,7 +318,80 @@ export async function setOdontogramItemStatus(
 }
 
 export async function removeOdontogramItem(itemId: string): Promise<void> {
+  await assertItemNotBilled(itemId)
+
   const { error } = await supabase.from('odontogram_items').delete().eq('id', itemId)
 
   if (error) throw toOdontogramError(error)
+}
+
+/**
+ * Impide cambiar o borrar una línea que ya tiene un movimiento de caja.
+ * El vínculo es la garantía contra el doble cobro; corregirlo se hace desde la
+ * caja, no desde el odontograma.
+ */
+async function assertItemNotBilled(itemId: string): Promise<void> {
+  const { data, error } = await supabase
+    .from('odontogram_items')
+    .select('patient_treatment_id')
+    .eq('id', itemId)
+    .maybeSingle()
+
+  if (error) throw toOdontogramError(error)
+
+  if ((data as { patient_treatment_id: string | null } | null)?.patient_treatment_id) {
+    throw new Error(
+      'Esta línea ya tiene un cobro en caja. Para cambiarla o quitarla, ajustá el movimiento desde Caja.',
+    )
+  }
+}
+
+/** Enlace entre una línea del odontograma y el tratamiento creado en caja. */
+export type BilledItemLink = {
+  itemId: string
+  patientTreatmentId: string
+}
+
+/**
+ * Marca como cobradas las líneas que acaban de pasar por caja:
+ * `status = completed`, `performed_at` y el vínculo con `patient_treatments`.
+ *
+ * Se llama **después** de `registerTreatmentCharge`. La condición
+ * `patient_treatment_id is null` evita pisar un cobro hecho en otra pestaña; si
+ * algo falla, quien llama recarga el odontograma y las líneas ya enlazadas
+ * dejan de ser cobrables.
+ */
+export async function markOdontogramItemsBilled(
+  links: BilledItemLink[],
+): Promise<OdontogramItem[]> {
+  if (links.length === 0) return []
+
+  const performedAt = new Date().toISOString()
+  const updated: OdontogramItem[] = []
+
+  for (const link of links) {
+    const { data, error } = await supabase
+      .from('odontogram_items')
+      .update({
+        status: 'completed' satisfies OdontogramItemStatus,
+        performed_at: performedAt,
+        patient_treatment_id: link.patientTreatmentId,
+      })
+      .eq('id', link.itemId)
+      .is('patient_treatment_id', null)
+      .select(ODONTOGRAM_ITEM_SELECT)
+      .maybeSingle()
+
+    if (error) throw toOdontogramError(error)
+
+    if (!data) {
+      throw new Error(
+        'No pudimos enlazar una pieza con su cobro: la línea ya no existe o ya estaba cobrada. Recargá el odontograma.',
+      )
+    }
+
+    updated.push(normalizeItem(data as unknown as RawItem))
+  }
+
+  return updated
 }

@@ -208,7 +208,6 @@ export async function fetchTreatmentsCatalog(): Promise<TreatmentCatalogItem[]> 
 }
 
 /** Borrado de compensación: si un paso falla, no se dejan filas huérfanas. */
-/** Borrado de compensación: si un paso falla, no se dejan filas huérfanas. */
 async function deleteByIds(
   table: 'transactions' | 'patient_treatments',
   ids: string[],
@@ -232,6 +231,10 @@ async function deleteByIds(
  * El guaraní no admite centavos: los importes se redondean. Este flujo cobra el
  * total o deja el cargo pendiente; los pagos parciales se registran con un
  * abono libre.
+ *
+ * Los ítems pueden traer pieza (FDI), cara y nota clínica: la caja los guarda en
+ * `tooth_numbers`, `surface` y `clinical_notes`. El resultado devuelve los IDs
+ * creados en el orden de los ítems cobrados.
  */
 export async function registerTreatmentCharge(
   input: TreatmentChargeInput,
@@ -276,7 +279,9 @@ export async function registerTreatmentCharge(
           quantity,
           unit_price: Math.max(0, item.unitPrice),
           performed_at: nowIso,
-          clinical_notes: input.notes,
+          tooth_numbers: item.toothNumber ? [String(Math.round(item.toothNumber))] : [],
+          surface: item.surface ?? null,
+          clinical_notes: item.notes?.trim() || input.notes,
         })
         .select('id')
         .single()
@@ -329,7 +334,13 @@ export async function registerTreatmentCharge(
       if (paymentError) throw toCashError(paymentError)
     }
 
-    return { patientId: input.patientId, kind: 'charge', total, collected: input.collected }
+    return {
+      patientId: input.patientId,
+      kind: 'charge',
+      total,
+      collected: input.collected,
+      treatmentIds,
+    }
   } catch (error) {
     await Promise.all([
       deleteByIds('transactions', chargeIds),

@@ -107,6 +107,7 @@ Las migraciones viven en `supabase/migrations` y se aplican **en orden**:
 | `20261031100000_team_profiles_and_roles.sql` | Equipo: enum `staff_role`, tabla `profiles`, helpers `current_staff_role()` / `is_admin()`, triggers (perfil al crear usuario en Auth, sincronización de email, protección del último admin) y RLS por rol. |
 | `20261031110000_treatments_catalog_pyg.sql` | Precios de referencia del catálogo en guaraníes (solo pisa los importes placeholder en USD) + índices de búsqueda. |
 | `20261031120000_odontogram_and_budget.sql` | Odontograma: enums de dentición/cara/estado, tablas `odontograms` y `odontogram_items` con el precio en PYG, validación FDI (11-48 y 51-85), índices anti-duplicado y RLS (lectura para el personal, escritura para odontología y administración). |
+| `20261031130000_odontogram_billing.sql` | Cobro del plan: `odontogram_items.patient_treatment_id` (FK al tratamiento de caja, `on delete set null`), índice único por línea cobrada, CHECK de coherencia con el estado `completed` e índice de las líneas pendientes de cobro. |
 
 Se aplican de cualquiera de estas dos formas:
 
@@ -173,7 +174,7 @@ src/
 │  ├─ RequireAuth.tsx         guard de rutas privadas
 │  └─ RequireAdmin.tsx        guard de rutas solo para administración
 ├─ features/treatments/       catálogo: servicio, hook, toolbar, tabla, modal
-├─ features/odontogram/       odontograma SVG, servicio de ítems, presupuesto y modal de pieza
+├─ features/odontogram/       odontograma SVG, servicio de ítems, presupuesto y cobro del plan
 ├─ features/team/             equipo: servicio, hook, toolbar, tabla y modales
 ├─ components/
 │  ├─ layout/AppLayout.tsx       sidebar fija (lg+) + drawer móvil + header
@@ -266,6 +267,17 @@ Se abre con el buscador de pacientes o por enlace directo: `/odontograma?pacient
   desglose pieza / cara / procedimiento, con acciones para cambiar el estado o quitar la línea.
 - **Sin duplicados:** un mismo tratamiento no se repite sobre la misma pieza y cara; volver a
   guardarlo actualiza la línea existente. Un índice único parcial lo garantiza en la base.
+- **Cobro del plan:** «Cobrar este plan» abre `ChargePlanModal`, permite elegir las líneas con
+  precio y sin cobro (por defecto las presupuestadas) y las envía a la caja con el mismo flujo que
+  un cobro de tratamiento (`registerTreatmentCharge`): un `patient_treatments` + un `charge` por
+  línea y, si se cobra en el momento, un `payment` por el total con método y recibo. También se
+  puede dejar el cargo a cuenta. La nota del movimiento resume el plan
+  (`Plan odontograma: Pieza 16 oclusal · Obturación; …`).
+- **Sin doble cobro:** cada línea cobrada guarda `patient_treatment_id`, pasa a `completed` con
+  `performed_at` y sale de la selección (badge «En caja» en el panel). Esas líneas ya no cambian de
+  estado ni se borran desde el odontograma: el ajuste se hace desde `/caja`. Si el cobro se registra
+  pero falla el enlace, la página recarga el odontograma y pide revisar la caja antes de reintentar;
+  si un movimiento se borra en la base, la línea clínica se conserva (`on delete set null`).
 - **RLS:** cualquier integrante con perfil activo puede leer el odontograma (recepción lo usa
   para cotizar), pero solo `dentist` y `admin` insertan, actualizan o borran
   (`can_manage_odontograms()`); la UI oculta las acciones de escritura para el resto.

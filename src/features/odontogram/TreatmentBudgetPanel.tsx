@@ -1,9 +1,11 @@
 import {
   AlertCircle,
   BadgeCheck,
+  Banknote,
   CircleCheck,
   ClipboardList,
   Loader2,
+  Receipt,
   RefreshCw,
   RotateCcw,
   Trash,
@@ -13,8 +15,11 @@ import {
   ITEM_STATUS_META,
   STATUS_ORDER,
   computeOdontogramTotals,
+  getChargeableItems,
+  getItemAmount,
   getItemLabel,
   getSurfaceLabel,
+  isBilledItem,
   sortOdontogramItems,
   type OdontogramItem,
   type OdontogramItemStatus,
@@ -41,6 +46,7 @@ function BudgetItemRow({
 }: BudgetItemRowProps) {
   const meta = ITEM_STATUS_META[item.status]
   const isAbsent = item.status === 'absent'
+  const isBilled = isBilledItem(item)
 
   return (
     <li className="px-4 py-3 sm:px-5">
@@ -59,6 +65,12 @@ function BudgetItemRow({
               <span className={`size-1.5 rounded-full ${meta.dot}`} aria-hidden="true" />
               {meta.label}
             </span>
+            {isBilled && (
+              <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-teal-50 px-1.5 py-0.5 text-[10px] font-medium text-teal-700 ring-1 ring-teal-200">
+                <Receipt className="size-2.5" aria-hidden="true" />
+                En caja
+              </span>
+            )}
           </div>
 
           <p className="mt-1 truncate text-xs text-slate-600">
@@ -83,7 +95,7 @@ function BudgetItemRow({
         </p>
       </div>
 
-      {!readOnly && (
+      {!readOnly && !isBilled && (
         <div className="mt-2 flex flex-wrap items-center gap-1.5">
           {item.status !== 'completed' && !isAbsent && (
             <button
@@ -141,6 +153,13 @@ function BudgetItemRow({
           </button>
         </div>
       )}
+
+      {isBilled && (
+        <p className="mt-2 flex items-start gap-1.5 text-[11px] leading-snug text-teal-700">
+          <Receipt className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
+          Cobrado en caja: para cambiarlo, ajustá el movimiento desde Caja.
+        </p>
+      )}
     </li>
   )
 }
@@ -180,6 +199,8 @@ export type TreatmentBudgetPanelProps = {
   onRetry: () => void
   onChangeStatus: (item: OdontogramItem, status: OdontogramItemStatus) => void
   onRemove: (item: OdontogramItem) => void
+  /** Abre el modal de «Cobrar este plan». */
+  onChargePlan: () => void
 }
 
 /**
@@ -198,9 +219,13 @@ export function TreatmentBudgetPanel({
   onRetry,
   onChangeStatus,
   onRemove,
+  onChargePlan,
 }: TreatmentBudgetPanelProps) {
   const sorted = sortOdontogramItems(items)
   const totals = computeOdontogramTotals(sorted)
+  const chargeable = getChargeableItems(sorted)
+  const chargeableTotal = chargeable.reduce((sum, item) => sum + getItemAmount(item), 0)
+  const billedCount = sorted.filter(isBilledItem).length
   const groups = STATUS_ORDER.map((status) => ({
     status,
     items: sorted.filter((item) => item.status === status),
@@ -255,6 +280,31 @@ export function TreatmentBudgetPanel({
         <StatusMetric status="budgeted" amount={totals.budgeted} count={counts.budgeted} />
         <StatusMetric status="completed" amount={totals.completed} count={counts.completed} />
       </div>
+
+      {!readOnly && totals.items > 0 && (
+        <div className="border-b border-slate-100 px-4 py-3 sm:px-5">
+          {chargeable.length > 0 ? (
+            <>
+              <button
+                type="button"
+                onClick={onChargePlan}
+                className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-brand-600 px-3 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-brand-700"
+              >
+                <Banknote className="size-4" aria-hidden="true" />
+                Cobrar este plan
+              </button>
+              <p className="mt-1.5 text-center text-[11px] text-slate-500">
+                {chargeable.length} {chargeable.length === 1 ? 'línea' : 'líneas'} sin cobrar ·{' '}
+                {formatPYG(chargeableTotal)}
+              </p>
+            </>
+          ) : billedCount > 0 ? (
+            <p className="rounded-xl bg-teal-50 px-3 py-2 text-center text-[11px] font-medium text-teal-700 ring-1 ring-teal-200">
+              Todo el plan está cobrado en caja.
+            </p>
+          ) : null}
+        </div>
+      )}
 
       <div className="min-h-0 flex-1 sm:max-h-[32rem] sm:overflow-y-auto">
         {isLoading ? (
@@ -326,6 +376,7 @@ export function TreatmentBudgetPanel({
       <footer className="border-t border-slate-100 bg-slate-50/60 px-4 py-3 text-[11px] leading-relaxed text-slate-500 sm:px-5">
         El total suma los procedimientos pendientes, presupuestados y realizados; las piezas
         ausentes no agregan importe. Cada precio queda congelado en guaraníes al guardar la línea.
+        Las líneas cobradas quedan enlazadas a su movimiento de caja.
       </footer>
     </aside>
   )

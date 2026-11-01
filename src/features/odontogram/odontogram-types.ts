@@ -57,6 +57,11 @@ export type OdontogramItem = {
   total_price: number
   notes: string | null
   performed_at: string | null
+  /**
+   * `patient_treatments.id` creado al cobrar la línea en caja.
+   * `null` = todavía no cobrado.
+   */
+  patient_treatment_id: string | null
   created_at: string
   updated_at: string
   treatment: TreatmentRef | null
@@ -120,6 +125,7 @@ export const ODONTOGRAM_ITEM_SELECT = [
   'total_price',
   'notes',
   'performed_at',
+  'patient_treatment_id',
   'created_at',
   'updated_at',
   `treatment:treatments(${TREATMENT_EMBED})`,
@@ -246,6 +252,13 @@ export type OdontogramTotals = {
   absentTeeth: number
 }
 
+/** Importe de una línea en guaraníes (las piezas ausentes no suman). */
+export function getItemAmount(item: OdontogramItem): number {
+  if (item.status === 'absent') return 0
+
+  return Math.round(Math.max(1, item.quantity) * Math.max(0, item.unit_price))
+}
+
 /** Totales del presupuesto en guaraníes. */
 export function computeOdontogramTotals(items: OdontogramItem[]): OdontogramTotals {
   const totals: OdontogramTotals = {
@@ -263,7 +276,7 @@ export function computeOdontogramTotals(items: OdontogramItem[]): OdontogramTota
       continue
     }
 
-    const amount = Math.round(Math.max(1, item.quantity) * Math.max(0, item.unit_price))
+    const amount = getItemAmount(item)
 
     totals.plan += amount
     totals.items += 1
@@ -274,6 +287,50 @@ export function computeOdontogramTotals(items: OdontogramItem[]): OdontogramTota
   }
 
   return totals
+}
+
+/** `true` cuando la línea ya tiene un movimiento de caja asociado. */
+export function isBilledItem(item: OdontogramItem): boolean {
+  return Boolean(item.patient_treatment_id)
+}
+
+/**
+ * Líneas que «Cobrar este plan» puede enviar a caja: procedimiento del
+ * catálogo, precio mayor a cero y sin cobro previo. Las piezas ausentes y las
+ * líneas sin precio quedan afuera porque la caja no registra importes en cero.
+ */
+export function isChargeableItem(item: OdontogramItem): boolean {
+  return (
+    item.status !== 'absent' &&
+    Boolean(item.treatment_id) &&
+    item.unit_price > 0 &&
+    !isBilledItem(item)
+  )
+}
+
+/** Líneas cobrables ordenadas como el panel, para que el cobro sea estable. */
+export function getChargeableItems(items: OdontogramItem[]): OdontogramItem[] {
+  return sortOdontogramItems(items.filter(isChargeableItem))
+}
+
+/**
+ * Resumen legible del plan para las notas del movimiento de caja, por ejemplo
+ * `Plan odontograma: Pieza 16 oclusal · Obturación; Pieza 26 pieza completa · Corona`.
+ */
+export function buildChargeNote(items: OdontogramItem[], limit = 480): string {
+  const parts = items.map(
+    (item) =>
+      `Pieza ${item.tooth_number} ${getSurfaceLabel(item.surface).toLowerCase()} · ${
+        item.treatment?.name ?? 'Procedimiento'
+      }`,
+  )
+
+  const note =
+    parts.length > 0 ? `Plan odontograma: ${parts.join('; ')}` : 'Plan odontograma'
+
+  if (note.length <= limit) return note
+
+  return `${note.slice(0, Math.max(0, limit - 1)).trimEnd()}…`
 }
 
 /** Orden del panel: estado, pieza y cara. */

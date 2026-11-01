@@ -122,6 +122,11 @@ export type ChargeItemInput = {
   treatmentId: string
   quantity: number
   unitPrice: number
+  /** Pieza FDI y cara cuando el cobro viene del odontograma (opcional). */
+  toothNumber?: number | null
+  surface?: string | null
+  /** Nota clínica propia de la línea; si falta se usa la nota del movimiento. */
+  notes?: string | null
 }
 
 export type TreatmentChargeInput = {
@@ -149,6 +154,11 @@ export type MovementResult = {
   kind: 'charge' | 'payment'
   total: number
   collected: boolean
+  /**
+   * IDs de `patient_treatments` creados, en el mismo orden que los ítems
+   * cobrados. Permite enlazar el cobro con su origen (p. ej. el odontograma).
+   */
+  treatmentIds?: string[]
 }
 
 /** Moneda con la que opera la clínica. */
