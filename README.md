@@ -144,11 +144,30 @@ Las migraciones viven en `supabase/migrations` y se aplican **en orden**:
 | `20261031110000_treatments_catalog_pyg.sql` | Precios de referencia del catálogo en guaraníes (solo pisa los importes placeholder en USD) + índices de búsqueda. |
 | `20261031120000_odontogram_and_budget.sql` | Odontograma: enums de dentición/cara/estado, tablas `odontograms` y `odontogram_items` con el precio en PYG, validación FDI (11-48 y 51-85), índices anti-duplicado y RLS (lectura para el personal, escritura para odontología y administración). |
 | `20261031130000_odontogram_billing.sql` | Cobro del plan: `odontogram_items.patient_treatment_id` (FK al tratamiento de caja, `on delete set null`), índice único por línea cobrada, CHECK de coherencia con el estado `completed` e índice de las líneas pendientes de cobro. |
+| `20261104120000_appointment_reschedule_status.sql` | Agrega el valor `reschedule_requested` al enum `appointment_status`. Va solo en su archivo porque PostgreSQL no permite usar un valor de enum nuevo dentro de la misma transacción que lo crea. |
+| `20261104120100_appointment_responses.sql` | Tabla de auditoría `appointment_responses` (teléfono, texto recibido, elección, resultado, `payload` sin credenciales) con `wa_message_id` **único** —es la llave de idempotencia del webhook— y las columnas `appointments.patient_response`, `patient_response_at` y `reschedule_requested_at`. |
+| `20261104120200_apply_appointment_response.sql` | RPC `apply_appointment_response(...)`: valida el mensaje, busca al paciente por teléfono (últimos 9 dígitos), aplica `1 → confirmed` / `2 → reschedule_requested` sobre la próxima cita pendiente y devuelve el resultado. Todo en una transacción, así que el cambio de estado y la fila de auditoría se guardan juntos. |
 
 Se aplican de cualquiera de estas dos formas:
 
 1. Supabase Dashboard → **SQL Editor** → pegar cada archivo completo → *Run* (en orden).
 2. Supabase CLI: `supabase db push` (con el proyecto enlazado).
+
+> **Historial de migraciones:** este proyecto se creó pegando el SQL a mano, así que el
+> remoto arrancó sin filas en `supabase_migrations.schema_migrations` y `db push` no sabía
+> qué estaba aplicado. Se resolvió marcando las migraciones viejas como ya aplicadas y
+> dejando que la CLI suba solo las nuevas:
+>
+> ```bash
+> supabase link --project-ref <project-ref>
+> supabase migration repair <version>… --status applied --remote --yes   # las 6 iniciales
+> supabase db push --remote --yes                                       # solo las nuevas
+> supabase migration list --remote                                      # verificar
+> ```
+>
+> `migration repair` **no** ejecuta SQL: solo escribe el registro. Antes de reparar, confírmá
+> que los objetos de esa migración existen de verdad en el remoto.
+
 
 > **RLS de `profiles`:** cada persona ve su propio perfil y administración ve a todo el
 > equipo; las escrituras directas a `profiles` quedan restringidas a `admin`. El resto de
@@ -386,4 +405,183 @@ Detalles de la integración:
   `sendAppointmentReminder()` lanza ese mismo aviso antes de intentar el envío.
 - **Credenciales:** `VITE_EVOLUTION_API_KEY` viaja en el bundle del navegador (como la `anon` key),
   así que conviene una clave exclusiva para la API y no reutilizar la del panel de Evolution.
+
+### 10. Respuestas del paciente por WhatsApp (webhook)
+
+El recordatorio termina con «responde *1* para confirmar tu asistencia o *2* para reagendar». El
+camino de vuelta lo resuelve una **Edge Function** que escucha los eventos de Evolution API:
+
+```
+Paciente responde «1» o «2»
+        ↓  Evolution API (instancia ad-clinic)
+POST https://<project-ref>.supabase.co/functions/v1/whatsapp-webhook
+        header x-webhook-secret: <WHATSAPP_WEBHOOK_SECRET>
+        ↓  supabase/functions/whatsapp-webhook/index.ts
+rpc('apply_appointment_response')  →  appointments.status + appointment_responses (auditoría)
+        ↓  (en segundo plano, con EdgeRuntime.waitUntil)
+Acuse al paciente por /message/sendText
+        ↓
+/agenda muestra el estado nuevo (badge «Confirmada» o «Reagendar» + chip de la respuesta)
+```
+
+| Respuesta | Estado resultante | Qué ve recepción |
+| --- | --- | --- |
+| `1` (también `confirmo`, `sí`, `dale`, `ok`, `voy`) | `confirmed` | Badge **«Confirmada»** (verde) más el chip «Confirmó por WhatsApp»; la cita deja de contar como pendiente. |
+| `2` (también `reagendar`, `reprogramar`, `cambiar`, `no puedo`) | `reschedule_requested` | Badge **«Reagendar»** (ámbar) más el chip «Pidió reagendar por WhatsApp», y suma al contador de pendientes de la agenda. |
+| Cualquier otra cosa | sin cambios | La respuesta queda registrada en `appointment_responses` (`choice = 'unknown'`) para revisarla. |
+
+Al reagendar desde la app, `buildRescheduleResetPatch()` deja la cita en `scheduled` y limpia
+`reschedule_requested_at` / `patient_response` / `patient_response_at`, así que el chip desaparece solo.
+
+
+**Piezas nuevas:**
+
+| Archivo | Rol |
+| --- | --- |
+| `supabase/migrations/20261104120000_…` … `20261104120200_…` | Enum `reschedule_requested`, tabla `appointment_responses` y RPC atómica (ver §5). |
+| `supabase/config.toml` | `verify_jwt = false` solo para `whatsapp-webhook` (lo llama el VPS, no un usuario logueado). |
+| `supabase/functions/whatsapp-webhook/index.ts` | Valida el secreto, filtra el evento, interpreta el texto, llama a la RPC y manda el acuse. |
+| `src/features/appointments/appointment-types.ts` | `reschedule_requested` en `AppointmentStatus`, tipo `PatientResponse` y textos de `PATIENT_RESPONSE_META`. |
+| `src/features/appointments/AgendaList.tsx` / `AppointmentsPage.tsx` | Icono por estado, chip de la respuesta y contador de pendientes. |
+
+**Decisiones de la implementación:**
+
+- **Idempotencia:** `appointment_responses.wa_message_id` es único. Evolution reintenta hasta 10
+  veces si no recibe `2xx`, y el reintento devuelve `{ applied: false, reason: "duplicate" }` sin
+  volver a tocar la cita.
+- **Autenticación:** no hay JWT. El único control es el secreto compartido del header; un secreto
+  inválido responde **401** (código que Evolution **no** reintenta, igual que 400/403/404/422).
+  El resto de los casos de negocio responde **200** para no generar reintentos inútiles.
+- **Teléfonos:** el paciente se busca comparando los **últimos 9 dígitos**, porque la ficha guarda
+  `0981 123 456` y Evolution manda `595981123456@s.whatsapp.net`.
+- **Privacidad:** el `payload` que se guarda se recorta a lo mínimo y **descarta la `apikey`** que
+  Evolution reenvía dentro del evento; los logs muestran el teléfono enmascarado (`5959****56`).
+- **Acuse:** se envía en segundo plano para responder al webhook en menos de un segundo y evitar
+  timeouts. Si el acuse falla, el estado de la cita ya quedó guardado.
+- **Zona horaria:** el acuse formatea con `America/Asuncion` fijo, no con la del servidor.
+
+#### Puesta en marcha (una sola vez)
+
+1. **Secreto compartido.** Generar y guardar el mismo valor en el `.env` local y en los secretos
+   de Supabase:
+
+   ```bash
+   node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+   ```
+
+2. **Secretos de la función** (la CLI los cifra en el proyecto; `SUPABASE_URL` y
+   `SUPABASE_SERVICE_ROLE_KEY` los inyecta Supabase sola):
+
+   ```bash
+   supabase secrets set \
+     WHATSAPP_WEBHOOK_SECRET=<secreto> \
+     EVOLUTION_API_URL=https://<host-del-tunel> \
+     EVOLUTION_API_KEY=<apikey> \
+     EVOLUTION_INSTANCE=ad-clinic --yes
+   ```
+
+   > `EVOLUTION_API_URL` es la **misma** URL del túnel que usa el frontend. Si cambia el túnel, el
+   > cambio de estado sigue funcionando (lo inicia Evolution), pero el **acuse** deja de salir hasta
+   > que se actualice el secreto: `supabase secrets set EVOLUTION_API_URL=… --yes`.
+
+3. **Desplegar.**
+
+   ```bash
+   supabase functions deploy whatsapp-webhook --no-verify-jwt --yes
+   supabase functions list          # confirmar la versión publicada
+   ```
+
+4. **Registrar el webhook en Evolution** (una vez por instancia; `headers` es donde viaja el secreto):
+
+   ```bash
+   curl -X POST "https://<host-del-tunel>/webhook/set/ad-clinic" \
+     -H "apikey: <apikey>" -H "Content-Type: application/json" \
+     -d '{
+       "webhook": {
+         "enabled": true,
+         "url": "https://<project-ref>.supabase.co/functions/v1/whatsapp-webhook",
+         "events": ["MESSAGES_UPSERT"],
+         "headers": { "x-webhook-secret": "<secreto>" },
+         "byEvents": false,
+         "base64": false
+       }
+     }'
+   ```
+
+   En PowerShell conviene armar el body con un hashtable y `ConvertTo-Json -Depth 6` (las comillas
+   simples del JSON se escapan mal en la consola). Verificar con
+   `GET /webhook/find/ad-clinic`: debe devolver `enabled: true`, la URL, `events` y el header.
+
+#### Cómo probarlo
+
+Con el túnel activo y la instancia en `state: open` (el webhook **no** depende del túnel, así que el
+cambio de estado funciona aunque la URL esté caída):
+
+| Prueba | Cómo | Resultado esperado |
+| --- | --- | --- |
+| Salud | `GET /functions/v1/whatsapp-webhook` | `{"ok":true,"service":"whatsapp-webhook"}` |
+| Sin secreto | `POST` sin `x-webhook-secret` | `401 {"error":"No autorizado."}` |
+| Número desconocido | `POST` con `data.key.remoteJid = "595999999999@s.whatsapp.net"` | `200 {"ok":true,"applied":false,"reason":"patient_not_found"}` |
+| Reintento | repetir el `POST` anterior (mismo `data.key.id`) | `200 {"ok":true,"applied":false,"reason":"duplicate"}` |
+| Texto libre | `message.conversation = "hola"` | `200 … "reason":"unknown_choice"` |
+| Mensaje propio | `data.key.fromMe = true` | `200 … "reason":"from_me"` (el bot no se responde a sí mismo) |
+| **Real** | mandar el recordatorio desde `/agenda` y responder `1` o `2` desde otro teléfono | La cita cambia de estado en segundos, el paciente recibe el acuse y queda la fila en `appointment_responses`. |
+
+Payload mínimo para las pruebas manuales (el mismo que manda Evolution):
+
+```json
+{
+  "event": "MESSAGES_UPSERT",
+  "instance": "ad-clinic",
+  "data": {
+    "key": { "remoteJid": "595981123456@s.whatsapp.net", "fromMe": false, "id": "TEST-1" },
+    "pushName": "Prueba",
+    "messageType": "conversation",
+    "message": { "conversation": "1" },
+    "messageTimestamp": 1762291200
+  }
+}
+```
+
+Para limpiar filas de prueba (con la `service_role`, nunca con la `anon`):
+
+```bash
+curl -X DELETE "https://<project-ref>.supabase.co/rest/v1/appointment_responses?wa_message_id=like.TEST-*" \
+  -H "apikey: <service_role>" -H "Authorization: Bearer <service_role>"
+```
+
+#### Diagnóstico
+
+| Síntoma | Causa probable | Solución |
+| --- | --- | --- |
+| Evolution no reintenta y el log dice `401` | El header `x-webhook-secret` del webhook no coincide con el secreto de Supabase. | Repetir el paso 4 (`/webhook/set`) con el valor correcto. |
+| Responde `503 Webhook sin configurar` | Falta `WHATSAPP_WEBHOOK_SECRET` (o tiene menos de 24 caracteres). | `supabase secrets set …` y volver a desplegar. |
+| Responde `Error 401 / JWT` de la plataforma | La función se desplegó con `verify_jwt` activo. | `supabase functions deploy whatsapp-webhook --no-verify-jwt --yes` (y revisar `supabase/config.toml`). |
+| `reason: patient_not_found` con un paciente real | El teléfono de la ficha no coincide en los últimos 9 dígitos, o el paciente respondió desde otro número. | Corregir el teléfono en la ficha; la respuesta queda en `appointment_responses` para reasignarla. |
+| `reason: appointment_not_found` | Respondió por una cita ya pasada, cancelada o de hace más de 12 h. | Nada que hacer: la cita no se toca. |
+| El estado cambia pero no llega el acuse | `EVOLUTION_API_URL` / `EVOLUTION_API_KEY` desactualizados o el túnel caído. | Actualizar el secreto y revisar el log de la función. |
+| El evento aparece como `event_ignored:…` | Evolution manda otro tipo de evento. | Dejar solo `MESSAGES_UPSERT` en el webhook (los demás no hacen falta). |
+
+Los logs de la función (Dashboard → **Edge Functions → whatsapp-webhook → Logs**) muestran una línea
+por evento con el teléfono enmascarado y el estado aplicado.
+
+#### Rollback
+
+- **Desactivar el webhook sin tocar la base:** `POST /webhook/set/ad-clinic` con `"enabled": false`
+  (o `DELETE /webhook/ad-clinic`). La app sigue enviando recordatorios normalmente.
+- **Revertir el estado de una cita a mano:**
+
+  ```sql
+  update public.appointments
+     set status = 'scheduled',
+         reschedule_requested_at = null,
+         patient_response = null,
+         patient_response_at = null
+   where id = '<uuid>';
+  ```
+
+- **Quitar el enum:** PostgreSQL no permite borrar un valor de enum; para revertir del todo habría
+  que recrear el tipo (no se recomienda con datos en producción). Lo seguro es dejar de usar el
+  estado en la UI.
+
 

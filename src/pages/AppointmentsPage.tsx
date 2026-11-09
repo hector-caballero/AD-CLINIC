@@ -71,7 +71,10 @@ export default function AppointmentsPage() {
     () => ({
       total: appointments.length,
       pending: appointments.filter(
-        (appointment) => appointment.status === 'scheduled' || appointment.status === 'confirmed',
+        (appointment) =>
+          appointment.status === 'scheduled' ||
+          appointment.status === 'confirmed' ||
+          appointment.status === 'reschedule_requested',
       ).length,
       completed: appointments.filter((appointment) => appointment.status === 'completed').length,
       cancelled: appointments.filter(

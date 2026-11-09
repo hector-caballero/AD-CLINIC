@@ -11,10 +11,18 @@ import type { Patient } from '../patients/patient-types'
 export type AppointmentStatus =
   | 'scheduled'
   | 'confirmed'
+  | 'reschedule_requested'
   | 'checked_in'
   | 'completed'
   | 'cancelled'
   | 'no_show'
+
+/**
+ * Respuesta del paciente al recordatorio de WhatsApp: «1» confirma y «2» pide
+ * reagendar. La carga el webhook de Evolution API
+ * (`supabase/functions/whatsapp-webhook`), nunca la interfaz.
+ */
+export type PatientResponse = 'confirm' | 'reschedule'
 
 /** Vista de la agenda: un día o los próximos 7 días desde la fecha ancla. */
 export type AppointmentView = 'day' | 'week'
@@ -33,6 +41,10 @@ export type Appointment = {
   checked_in_at: string | null
   completed_at: string | null
   reminder_sent_at: string | null
+  /** Última respuesta del paciente por WhatsApp (la escribe el webhook). */
+  patient_response: PatientResponse | null
+  patient_response_at: string | null
+  reschedule_requested_at: string | null
   created_at: string
   updated_at: string
 }
@@ -99,6 +111,9 @@ export const APPOINTMENT_SELECT = [
   'checked_in_at',
   'completed_at',
   'reminder_sent_at',
+  'patient_response',
+  'patient_response_at',
+  'reschedule_requested_at',
   'created_at',
   'updated_at',
   `patient:patients(${PATIENT_EMBED})`,
@@ -123,6 +138,11 @@ export const APPOINTMENT_STATUS_META: Record<AppointmentStatus, StatusMeta> = {
     badge: 'bg-emerald-50 text-emerald-700 ring-emerald-200',
     accent: 'bg-emerald-500',
   },
+  reschedule_requested: {
+    label: 'Reagendar',
+    badge: 'bg-amber-50 text-amber-800 ring-amber-200',
+    accent: 'bg-amber-500',
+  },
   checked_in: {
     label: 'En sala',
     badge: 'bg-indigo-50 text-indigo-700 ring-indigo-200',
@@ -146,7 +166,29 @@ export const APPOINTMENT_STATUS_META: Record<AppointmentStatus, StatusMeta> = {
 }
 
 /** Estados que todavía esperan atención del odontólogo. */
-export const ACTIVE_STATUSES: AppointmentStatus[] = ['scheduled', 'confirmed', 'checked_in']
+export const ACTIVE_STATUSES: AppointmentStatus[] = [
+  'scheduled',
+  'confirmed',
+  'reschedule_requested',
+  'checked_in',
+]
+
+/** Cómo se muestra en la agenda la respuesta que dio el paciente por WhatsApp. */
+export const PATIENT_RESPONSE_META: Record<
+  PatientResponse,
+  { label: string; badge: string; icon: string }
+> = {
+  confirm: {
+    label: 'Confirmó por WhatsApp',
+    badge: 'bg-emerald-50 text-emerald-700 ring-emerald-200',
+    icon: 'text-emerald-600',
+  },
+  reschedule: {
+    label: 'Pidió reagendar por WhatsApp',
+    badge: 'bg-amber-50 text-amber-800 ring-amber-200',
+    icon: 'text-amber-600',
+  },
+}
 
 export type QuickAction = {
   status: AppointmentStatus
@@ -170,6 +212,13 @@ export const APPOINTMENT_ACTIONS: Record<AppointmentStatus, QuickAction[]> = {
     { status: 'no_show', label: 'No asistió', tone: 'neutral' },
   ],
   checked_in: [{ status: 'completed', label: 'Atendida', tone: 'primary' }],
+  // El paciente respondió «2»: recepción lo llama, reprograma con el lápiz
+  // (eso devuelve la cita a `scheduled`) o decide mantener el horario.
+  reschedule_requested: [
+    { status: 'confirmed', label: 'Mantener', tone: 'primary' },
+    { status: 'completed', label: 'Atendida', tone: 'neutral' },
+    { status: 'no_show', label: 'No asistió', tone: 'neutral' },
+  ],
   completed: [{ status: 'confirmed', label: 'Reabrir', tone: 'neutral' }],
   cancelled: [{ status: 'scheduled', label: 'Reabrir', tone: 'neutral' }],
   no_show: [{ status: 'scheduled', label: 'Reabrir', tone: 'neutral' }],
@@ -177,7 +226,12 @@ export const APPOINTMENT_ACTIONS: Record<AppointmentStatus, QuickAction[]> = {
 
 /** Estados en los que tiene sentido cancelar la cita. */
 export function canCancel(status: AppointmentStatus): boolean {
-  return status === 'scheduled' || status === 'confirmed' || status === 'checked_in'
+  return (
+    status === 'scheduled' ||
+    status === 'confirmed' ||
+    status === 'reschedule_requested' ||
+    status === 'checked_in'
+  )
 }
 
 export function getAppointmentPatientName(appointment: AppointmentWithPatient): string {

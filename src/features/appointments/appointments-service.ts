@@ -1,7 +1,7 @@
 import { supabase } from '../../lib/supabase'
 import { toAppointmentError } from './appointment-errors'
 import { buildAgendaRange } from './appointment-dates'
-import { buildStatusPatch } from './appointment-patch'
+import { buildStatusPatch, buildRescheduleResetPatch } from './appointment-patch'
 import {
   APPOINTMENT_SELECT,
   compareAppointments,
@@ -86,14 +86,25 @@ export async function createAppointment(input: AppointmentInput): Promise<Appoin
   return normalizeAppointment(asAppointment(data))
 }
 
-/** Edita horario/motivo/notas sin tocar el estado (eso lo hacen las acciones). */
+/**
+ * Edita horario/motivo/notas sin tocar el estado (eso lo hacen las acciones).
+ *
+ * `resetRescheduleRequest` devuelve la cita a `scheduled` cuando recepción
+ * reprograma una cita que el paciente había pedido mover por WhatsApp: el pedido
+ * queda resuelto y el recordatorio se puede volver a enviar.
+ */
 export async function updateAppointment(
   id: string,
   input: AppointmentInput,
+  options: { resetRescheduleRequest?: boolean } = {},
 ): Promise<AppointmentWithPatient> {
+  const payload = options.resetRescheduleRequest
+    ? { ...input, ...buildRescheduleResetPatch() }
+    : input
+
   const { data, error } = await supabase
     .from('appointments')
-    .update(input)
+    .update(payload)
     .eq('id', id)
     .select(APPOINTMENT_SELECT)
     .single()

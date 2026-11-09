@@ -1,0 +1,19 @@
+# =============================================================================
+# AD Clinic · Configuración del proyecto Supabase
+# -----------------------------------------------------------------------------
+# El archivo existe para que `supabase functions deploy` no pierda los ajustes de
+# cada función: sin `[functions.<nombre>]` el CLI aplica los valores por defecto
+# (JWT obligatorio) en cada despliegue.
+# =============================================================================
+
+project_id = "jzorihtaauuskaijwfkp"
+
+# Gestión de usuarios: la llama la app con la sesión del administrador.
+[functions.team-admin]
+verify_jwt = true
+
+# Webhook de Evolution API: no hay usuario de Supabase detrás. La autenticación
+# es el secreto compartido del header `x-webhook-secret`
+# (secreto WHATSAPP_WEBHOOK_SECRET).
+[functions.whatsapp-webhook]
+verify_jwt = false

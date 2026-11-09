@@ -250,7 +250,11 @@ export function AppointmentFormModal({
 
     try {
       const saved = appointment
-        ? await updateAppointment(appointment.id, input)
+        ? await updateAppointment(appointment.id, input, {
+            // Si el paciente había pedido reagendar por WhatsApp, reprogramar
+            // cierra el pedido y la cita vuelve a "Programada".
+            resetRescheduleRequest: appointment.status === 'reschedule_requested',
+          })
         : await createAppointment(input)
 
       onSaved(saved, mode)

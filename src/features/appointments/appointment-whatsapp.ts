@@ -21,7 +21,15 @@ export { CLINIC_NAME, formatReminderDate }
 /** Teléfono principal y, si no sirve, el alternativo (`595981123456`). */
 export const getReminderNumber = getWhatsAppNumber
 
-/** Mensaje precargado en WhatsApp con fecha, horario y motivo. */
+/**
+ * Mensaje precargado en WhatsApp con fecha, horario y motivo.
+ *
+ * Cierra con la misma consigna que el recordatorio automático
+ * (`buildAppointmentReminderText()` en `src/services/whatsapp.ts`): *1* confirma
+ * y *2* reagenda. Da igual si el mensaje sale solo o a mano, porque la respuesta
+ * la interpreta el webhook (`supabase/functions/whatsapp-webhook`) leyendo el
+ * texto, no el origen del envío.
+ */
 export function buildReminderMessage(appointment: AppointmentWithPatient): string {
   const firstName = appointment.patient?.first_name?.trim() || 'paciente'
   const date = formatReminderDate(appointment.starts_at)
@@ -32,7 +40,7 @@ export function buildReminderMessage(appointment: AppointmentWithPatient): strin
     `Hola ${firstName}, te escribimos de ${CLINIC_NAME}.`,
     `Te recordamos tu cita del ${date} de ${start} a ${end} hs.`,
     `Motivo: ${appointment.reason}.`,
-    'Si no podés asistir, avisanos por este medio. ¡Gracias!',
+    'Por favor responde *1* para confirmar tu asistencia o *2* para reagendar.',
   ].join('\n')
 }
 

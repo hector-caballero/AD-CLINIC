@@ -1,11 +1,13 @@
 import {
   BadgeCheck,
   Ban,
+  CalendarClock,
   CheckCheck,
   Loader2,
   LogIn,
   MessageCircle,
   MessageCircleMore,
+  MessageCircleReply,
   Pencil,
   RotateCcw,
   ShieldAlert,
@@ -23,6 +25,7 @@ import {
   ACTIVE_STATUSES,
   APPOINTMENT_ACTIONS,
   APPOINTMENT_STATUS_META,
+  PATIENT_RESPONSE_META,
   canCancel,
   getAppointmentPatientName,
   type AppointmentStatus,
@@ -47,6 +50,7 @@ type AgendaListProps = {
 
 const ACTION_ICONS: Record<AppointmentStatus, typeof RotateCcw> = {
   confirmed: BadgeCheck,
+  reschedule_requested: CalendarClock,
   checked_in: LogIn,
   completed: CheckCheck,
   no_show: UserX,
@@ -137,6 +141,9 @@ function AppointmentRow({
 }: AppointmentRowProps) {
   const meta = APPOINTMENT_STATUS_META[appointment.status]
   const actions = APPOINTMENT_ACTIONS[appointment.status]
+  const responseMeta = appointment.patient_response
+    ? PATIENT_RESPONSE_META[appointment.patient_response]
+    : null
   const patient = appointment.patient
   const patientName = getAppointmentPatientName(appointment)
   const start = formatAppointmentTime(appointment.starts_at)
@@ -183,6 +190,19 @@ function AppointmentRow({
           >
             {meta.label}
           </span>
+          {responseMeta && (
+            <span
+              className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium ring-1 ${responseMeta.badge}`}
+            >
+              <MessageCircleReply className="size-3" aria-hidden="true" />
+              {responseMeta.label}
+              {appointment.patient_response_at && (
+                <span className="font-normal tabular-nums opacity-80">
+                  · {formatAppointmentTime(appointment.patient_response_at)}
+                </span>
+              )}
+            </span>
+          )}
           {isOverdue && (
             <span className="inline-flex items-center rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-800 ring-1 ring-amber-200">
               Vencida
