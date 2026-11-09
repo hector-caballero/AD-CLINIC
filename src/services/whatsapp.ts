@@ -43,20 +43,49 @@ const CONNECTION_MESSAGE =
   'No se pudo conectar con Evolution API. Revisá la conexión a internet, que el servidor esté activo y que CORS permita el dominio de la clínica.'
 
 function readEnv(value: string | undefined): string {
-  return value?.trim() ?? ''
+  return (value ?? '').trim()
+}
+
+/**
+ * URL base ya normalizada: sin espacios y **sin barras inclinadas finales**, así
+ * `${baseUrl}/message/sendText/…` nunca queda con `//`.
+ */
+function readBaseUrl(): string {
+  return readEnv(import.meta.env.VITE_EVOLUTION_API_URL).replace(/\/+$/, '')
+}
+
+/** `true` solo para URLs absolutas (`https://host[:puerto]`, `http://host`). */
+function isAbsoluteUrl(value: string): boolean {
+  return /^https?:\/\/[^/\s]+/i.test(value)
+}
+
+/**
+ * `true` si `VITE_EVOLUTION_API_URL` está definida pero **no** es absoluta
+ * (`/api`, `mi-servidor:8080`, `//host`).
+ *
+ * Una URL relativa es la causa del **HTTP 405** en la app: el navegador pide
+ * `/message/sendText/…` al servidor que sirve el frontend (nginx, `vite
+ * preview`, etc.) y ese servidor solo acepta GET para archivos estáticos.
+ */
+export function isEvolutionUrlInvalid(): boolean {
+  const baseUrl = readBaseUrl()
+
+  return baseUrl.length > 0 && !isAbsoluteUrl(baseUrl)
 }
 
 /**
  * Configuración leída de `import.meta.env` (solo variables `VITE_*`).
- * Devuelve `null` si falta alguna de las tres, así la agenda puede avisar en
- * lugar de fallar al importar el módulo.
+ *
+ * Devuelve `null` si falta alguna de las tres o si la URL no es absoluta, así
+ * la agenda avisa en lugar de fallar al importar el módulo.
  */
 export function getEvolutionConfig(): EvolutionConfig | null {
-  const baseUrl = readEnv(import.meta.env.VITE_EVOLUTION_API_URL).replace(/\/+$/, '')
+  const baseUrl = readBaseUrl()
   const apiKey = readEnv(import.meta.env.VITE_EVOLUTION_API_KEY)
-  const instance = readEnv(import.meta.env.VITE_EVOLUTION_INSTANCE)
+  const instance = readEnv(import.meta.env.VITE_EVOLUTION_INSTANCE).replace(/^\/+|\/+$/g, '')
 
   if (!baseUrl || !apiKey || !instance) return null
+  if (!isAbsoluteUrl(baseUrl)) return null
 
   return { baseUrl, apiKey, instance }
 }
@@ -68,6 +97,12 @@ export function isWhatsAppConfigured(): boolean {
 
 const MIXED_CONTENT_MESSAGE =
   'La app se sirve por HTTPS y Evolution API está en HTTP: el navegador bloquea esa petición (contenido mixto). Usá una URL `https://` en VITE_EVOLUTION_API_URL — por ejemplo el túnel de Cloudflare — y volvé a compilar.'
+
+const INVALID_URL_MESSAGE =
+  'VITE_EVOLUTION_API_URL tiene que ser una URL absoluta, por ejemplo `https://mi-clinica.trycloudflare.com` (sin barra final). Con una ruta relativa el navegador pide `/message/sendText/…` al servidor de la app y responde «405 Not Allowed». Corregí el `.env` y volvé a compilar.'
+
+const MISSING_ENV_MESSAGE_UI =
+  'El envío automático de recordatorios está desactivado: falta configurar Evolution API (`VITE_EVOLUTION_API_URL`, `VITE_EVOLUTION_API_KEY` y `VITE_EVOLUTION_INSTANCE` en el `.env`). Mientras tanto, el botón de chat abre WhatsApp Web con el mensaje escrito.'
 
 /**
  * `true` cuando la página va por HTTPS pero la API está en HTTP.
@@ -102,12 +137,12 @@ export type WhatsAppStatus = {
 export function getWhatsAppStatus(): WhatsAppStatus {
   const config = getEvolutionConfig()
 
+  if (isEvolutionUrlInvalid()) {
+    return { ready: false, warning: INVALID_URL_MESSAGE }
+  }
+
   if (!config) {
-    return {
-      ready: false,
-      warning:
-        'El envío automático de recordatorios está desactivado: falta configurar Evolution API (`VITE_EVOLUTION_API_URL`, `VITE_EVOLUTION_API_KEY` y `VITE_EVOLUTION_INSTANCE` en el `.env`). Mientras tanto, el botón de chat abre WhatsApp Web con el mensaje escrito.',
-    }
+    return { ready: false, warning: MISSING_ENV_MESSAGE_UI }
   }
 
   if (isMixedContentBlocked()) {
@@ -360,7 +395,11 @@ export async function sendWhatsAppText(
 ): Promise<WhatsAppTextResult> {
   const config = getEvolutionConfig()
 
-  if (!config) throw new WhatsAppError(MISSING_ENV_MESSAGE)
+  if (!config) {
+    // Distingue «falta la variable» de «la URL no es absoluta»: esta última
+    // termina pidiendo `/message/sendText/…` al servidor del frontend (405).
+    throw new WhatsAppError(isEvolutionUrlInvalid() ? INVALID_URL_MESSAGE : MISSING_ENV_MESSAGE)
+  }
 
   // Contenido mixto: el navegador cortaría el `fetch` sin dar detalle.
   if (isMixedContentBlocked()) throw new WhatsAppError(MIXED_CONTENT_MESSAGE)
@@ -374,10 +413,13 @@ export async function sendWhatsAppText(
   const controller = new AbortController()
   const timeout = window.setTimeout(() => controller.abort(), timeoutMs)
 
+  // `baseUrl` ya viene sin barras finales: `https://host/message/sendText/instancia`.
+  const url = `${config.baseUrl}/message/sendText/${config.instance}`
+
   let response: Response
 
   try {
-    response = await fetch(`${config.baseUrl}/message/sendText/${config.instance}`, {
+    response = await fetch(url, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

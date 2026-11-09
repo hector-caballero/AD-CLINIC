@@ -380,7 +380,9 @@ Detalles de la integración:
     Si se usa un subdominio público, restringí `CORS_ORIGIN` al dominio de la clínica y no
     reutilices la clave del panel de Evolution.
 - **Guardas en la UI:** `getWhatsAppStatus()` resume el estado (`ready` / `warning`) y la agenda
-  muestra un banner ámbar si falta configuración o si la página va por HTTPS con una URL `http://`;
+  muestra un banner ámbar si falta configuración, si `VITE_EVOLUTION_API_URL` no es una URL
+  absoluta (una ruta relativa manda el `fetch` al servidor del frontend y devuelve
+  «405 Not Allowed») o si la página va por HTTPS con una URL `http://`;
   `sendAppointmentReminder()` lanza ese mismo aviso antes de intentar el envío.
 - **Credenciales:** `VITE_EVOLUTION_API_KEY` viaja en el bundle del navegador (como la `anon` key),
   así que conviene una clave exclusiva para la API y no reutilizar la del panel de Evolution.
