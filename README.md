@@ -354,9 +354,34 @@ Detalles de la integración:
   Evolution (aplanado desde `message`, `error` o `response.message`).
 - **Red:** la petición se aborta a los 20 s y, si el navegador está sin conexión, se avisa antes de
   intentar el envío.
-- **CORS / HTTPS:** Evolution debe permitir el origen de la app (`CORS_ORIGIN` en el VPS). Si el
-  frontend se publica por HTTPS, Evolution también necesita HTTPS (proxy inverso); un navegador
-  bloquea las llamadas desde una página HTTPS a `http://…`.
+- **CORS:** verificado contra el VPS: Evolution refleja cualquier `Origin`
+  (`access-control-allow-origin: <el que pida el navegador>`, `allow-headers: content-type,apikey`),
+  así que el preflight `OPTIONS` pasa tanto desde `http://localhost:5173` como desde un dominio
+  HTTPS. Si más adelante se cierra `CORS_ORIGIN`, hay que incluir el dominio de la clínica.
+- **HTTPS / contenido mixto:** una página HTTPS no puede llamar a `http://…`; el navegador corta
+  el `fetch` antes de salir a la red. Por eso la API se publica con **Cloudflare Tunnel**:
+
+  ```bash
+  # En el VPS: expone el 8080 local como https://<palabras>.trycloudflare.com
+  cloudflared tunnel --url http://localhost:8080
+  ```
+
+  Ese hostname es el que va en `VITE_EVOLUTION_API_URL`. Verificado punta a punta: `OPTIONS`,
+  `GET /instance/connectionState/ad-clinic` (`state: open`) y `POST /message/sendText` responden
+  por el túnel con los headers CORS intactos.
+
+  - El quick tunnel es **efímero**: el hostname cambia cada vez que se reinicia `cloudflared` y
+    deja de funcionar si el proceso se cae. Para producción conviene un **named tunnel** con
+    subdominio propio (`cloudflared tunnel create ad-clinic` + `cloudflared tunnel route dns …
+    ad-clinic.dominio.com`) o Caddy/nginx con certificado (Let's Encrypt) en el VPS.
+  - Al cambiar la URL hay que **recompilar** (`npm run build`): las variables `VITE_*` se inyectan
+    en el bundle. El service worker (`skipWaiting` + `clientsClaim`) entrega la versión nueva.
+  - El túnel expone Evolution a internet: quien tenga la URL y la `apikey` puede enviar mensajes.
+    Si se usa un subdominio público, restringí `CORS_ORIGIN` al dominio de la clínica y no
+    reutilices la clave del panel de Evolution.
+- **Guardas en la UI:** `getWhatsAppStatus()` resume el estado (`ready` / `warning`) y la agenda
+  muestra un banner ámbar si falta configuración o si la página va por HTTPS con una URL `http://`;
+  `sendAppointmentReminder()` lanza ese mismo aviso antes de intentar el envío.
 - **Credenciales:** `VITE_EVOLUTION_API_KEY` viaja en el bundle del navegador (como la `anon` key),
   así que conviene una clave exclusiva para la API y no reutilizar la del panel de Evolution.
 

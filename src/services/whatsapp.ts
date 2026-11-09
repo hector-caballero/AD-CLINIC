@@ -66,6 +66,57 @@ export function isWhatsAppConfigured(): boolean {
   return getEvolutionConfig() !== null
 }
 
+const MIXED_CONTENT_MESSAGE =
+  'La app se sirve por HTTPS y Evolution API está en HTTP: el navegador bloquea esa petición (contenido mixto). Usá una URL `https://` en VITE_EVOLUTION_API_URL — por ejemplo el túnel de Cloudflare — y volvé a compilar.'
+
+/**
+ * `true` cuando la página va por HTTPS pero la API está en HTTP.
+ *
+ * Los navegadores bloquean ese `fetch` antes de salir a la red, así que
+ * conviene detectarlo para avisar con un mensaje entendible en lugar de dejar
+ * que falle como «no se pudo conectar».
+ */
+export function isMixedContentBlocked(): boolean {
+  if (typeof window === 'undefined') return false
+
+  const config = getEvolutionConfig()
+
+  if (!config) return false
+
+  return window.location.protocol === 'https:' && /^http:\/\//i.test(config.baseUrl)
+}
+
+/** Estado del envío automático, tal como lo muestra la agenda. */
+export type WhatsAppStatus = {
+  /** `true` solo si la agenda puede enviar recordatorios desde el navegador. */
+  ready: boolean
+  /** Aviso para el banner de la agenda (`null` si todo está en orden). */
+  warning: string | null
+}
+
+/**
+ * Resume por qué el envío automático puede estar desactivado: falta de
+ * variables o mezcla de HTTP/HTTPS. La agenda muestra `warning` como banner y
+ * deja el botón manual de WhatsApp siempre disponible.
+ */
+export function getWhatsAppStatus(): WhatsAppStatus {
+  const config = getEvolutionConfig()
+
+  if (!config) {
+    return {
+      ready: false,
+      warning:
+        'El envío automático de recordatorios está desactivado: falta configurar Evolution API (`VITE_EVOLUTION_API_URL`, `VITE_EVOLUTION_API_KEY` y `VITE_EVOLUTION_INSTANCE` en el `.env`). Mientras tanto, el botón de chat abre WhatsApp Web con el mensaje escrito.',
+    }
+  }
+
+  if (isMixedContentBlocked()) {
+    return { ready: false, warning: MIXED_CONTENT_MESSAGE }
+  }
+
+  return { ready: true, warning: null }
+}
+
 
 /**
  * Teléfono paraguayo → número de WhatsApp.
@@ -212,6 +263,43 @@ function collectErrorMessages(value: unknown, depth = 0): string[] {
   return []
 }
 
+/** Motivos HTTP genéricos que no aportan nada al usuario. */
+const GENERIC_HTTP_REASONS = new Set([
+  'bad request',
+  'unauthorized',
+  'forbidden',
+  'not found',
+  'internal server error',
+  'service unavailable',
+])
+
+/**
+ * Detalle útil del error.
+ *
+ * Evolution devuelve `{ status, error: 'Bad Request', response: { message } }`:
+ * `error` es solo el motivo HTTP y el detalle real viaja en `response.message`
+ * (a veces anidado en arreglos), así que se busca en ese orden y se descartan
+ * los motivos genéricos.
+ */
+function getErrorDetail(body: unknown): string | null {
+  if (typeof body === 'string') {
+    const trimmed = body.trim()
+
+    return trimmed && !GENERIC_HTTP_REASONS.has(trimmed.toLowerCase()) ? trimmed : null
+  }
+
+  if (!body || typeof body !== 'object') return null
+
+  const candidate = body as EvolutionErrorBody
+  const messages = [
+    ...collectErrorMessages(candidate.response?.message),
+    ...collectErrorMessages(candidate.message),
+    ...collectErrorMessages(candidate.error),
+  ]
+
+  return messages.find((text) => !GENERIC_HTTP_REASONS.has(text.toLowerCase())) ?? null
+}
+
 function describeHttpFailure(status: number, body: unknown): string {
   if (status === 401 || status === 403) {
     return 'Evolution API rechazó la petición: revisá que VITE_EVOLUTION_API_KEY sea la clave de la API.'
@@ -225,7 +313,7 @@ function describeHttpFailure(status: number, body: unknown): string {
     return `Evolution API respondió con un error interno (${status}). Revisá el estado de la instancia en el VPS.`
   }
 
-  const detail = collectErrorMessages(body)[0]
+  const detail = getErrorDetail(body)
 
   if (detail) return `No se pudo enviar el recordatorio: ${detail}`
 
@@ -273,6 +361,9 @@ export async function sendWhatsAppText(
   const config = getEvolutionConfig()
 
   if (!config) throw new WhatsAppError(MISSING_ENV_MESSAGE)
+
+  // Contenido mixto: el navegador cortaría el `fetch` sin dar detalle.
+  if (isMixedContentBlocked()) throw new WhatsAppError(MIXED_CONTENT_MESSAGE)
 
   if (typeof navigator !== 'undefined' && !navigator.onLine) {
     throw new WhatsAppError(

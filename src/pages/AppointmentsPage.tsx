@@ -29,7 +29,7 @@ import { buildReminderUrl } from '../features/appointments/appointment-whatsapp'
 import { useAppointments } from '../features/appointments/useAppointments'
 import { usePatients } from '../features/patients/usePatients'
 import { formatPhonePY } from '../lib/format'
-import { isWhatsAppConfigured, sendAppointmentReminder } from '../services/whatsapp'
+import { getWhatsAppStatus, sendAppointmentReminder } from '../services/whatsapp'
 
 type FormState =
   | { mode: 'create'; date: string }
@@ -259,6 +259,8 @@ export default function AppointmentsPage() {
 
 
   const isDayViewEmpty = !isLoading && !error && view === 'day' && appointments.length === 0
+  // Se recalcula en cada render: solo depende de las variables VITE_* y del protocolo.
+  const whatsappStatus = getWhatsAppStatus()
 
   return (
     <div className="space-y-5">
@@ -319,11 +321,9 @@ export default function AppointmentsPage() {
           </div>
         )}
 
-        {!isWhatsAppConfigured() && (
+        {whatsappStatus.warning && (
           <div className="border-b border-amber-100 bg-amber-50 px-4 py-2.5 text-xs text-amber-800 sm:px-5">
-            El envío automático de recordatorios está desactivado: falta configurar Evolution API
-            (`VITE_EVOLUTION_API_URL`, `VITE_EVOLUTION_API_KEY` y `VITE_EVOLUTION_INSTANCE` en el
-            `.env`). Mientras tanto, el botón de chat abre WhatsApp Web con el mensaje escrito.
+            {whatsappStatus.warning}
           </div>
         )}
 
