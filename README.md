@@ -49,6 +49,12 @@ Copy-Item .env.example .env
 | --- | --- |
 | `VITE_SUPABASE_URL` | Project URL del proyecto Supabase (`https://<ref>.supabase.co`). |
 | `VITE_SUPABASE_ANON_KEY` | Clave pública `anon` / `publishable`. **Nunca** la `service_role`. |
+| `VITE_EVOLUTION_API_URL` | URL base de Evolution API (WhatsApp de la clínica), sin `/` final. |
+| `VITE_EVOLUTION_API_KEY` | `apikey` global de Evolution API (`AUTHENTICATION_API_KEY`). |
+| `VITE_EVOLUTION_INSTANCE` | Nombre de la instancia conectada (por ejemplo `ad-clinic`). |
+
+Las tres variables de Evolution son opcionales: sin ellas la agenda funciona igual y solo se
+desactiva el envío automático de recordatorios (con un aviso visible en `/agenda`).
 
 Los archivos `.env*` están en `.gitignore`; solo se versiona `.env.example`.
 
@@ -319,4 +325,38 @@ Se abre con el buscador de pacientes o por enlace directo: `/odontograma?pacient
 > La migración del odontograma usa los helpers `current_staff_role()` e `is_admin()` de
 > `20261031100000_team_profiles_and_roles.sql`, así que debe aplicarse después de esa.
 
+### 9. Recordatorios de WhatsApp (Evolution API)
+
+En `/agenda` cada cita tiene dos acciones de WhatsApp:
+
+- **Recordar** (botón verde): envía el recordatorio automáticamente desde el número de la clínica
+  vía Evolution API. Muestra un spinner mientras viaja la petición, un aviso verde con el número
+  destino al terminar y un aviso rojo con el motivo si falla. Al enviarse, la cita guarda
+  `reminder_sent_at` y la fila muestra «Recordatorio de WhatsApp enviado a las HH:MM».
+- **Botón de chat** (icono junto a «Recordar»): abre `https://wa.me/<número>?text=…` con el
+  mensaje escrito, para enviarlo a mano si la API no está disponible.
+
+El envío vive en `src/services/whatsapp.ts`:
+
+| Pieza | Rol |
+| --- | --- |
+| `toParaguayWhatsAppNumber()` | `0981 123 456`, `+595 981 123 456`, `595-981-123456` → `595981123456`. Devuelve `null` si no quedan 8-9 dígitos nacionales. |
+| `getWhatsAppNumber()` | Teléfono principal del paciente y, si no sirve, el alternativo. |
+| `buildAppointmentReminderText()` | Mensaje en español: nombre, fecha y hora locales, y las respuestas `1` (confirma) / `2` (reagenda). |
+| `sendAppointmentReminder()` | `POST {URL}/message/sendText/{instancia}` con `apikey` y `{ number, text }`. Lanza `WhatsAppError` con el motivo ya redactado. |
+
+Detalles de la integración:
+
+- **Endpoint:** `POST /message/sendText/:instance` con los headers `Content-Type: application/json`
+  y `apikey`. El body lleva `number` (internacional, sin `+`) y `text` (admite `*negrita*`).
+- **Errores:** 401/403 se traducen a «revisá la API key», 404 a «revisá el nombre de la
+  instancia», 5xx a «revisá la instancia en el VPS» y los 4xx muestran el mensaje que devuelve
+  Evolution (aplanado desde `message`, `error` o `response.message`).
+- **Red:** la petición se aborta a los 20 s y, si el navegador está sin conexión, se avisa antes de
+  intentar el envío.
+- **CORS / HTTPS:** Evolution debe permitir el origen de la app (`CORS_ORIGIN` en el VPS). Si el
+  frontend se publica por HTTPS, Evolution también necesita HTTPS (proxy inverso); un navegador
+  bloquea las llamadas desde una página HTTPS a `http://…`.
+- **Credenciales:** `VITE_EVOLUTION_API_KEY` viaja en el bundle del navegador (como la `anon` key),
+  así que conviene una clave exclusiva para la API y no reutilizar la del panel de Evolution.
 

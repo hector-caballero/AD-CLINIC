@@ -28,6 +28,8 @@ import {
 import { buildReminderUrl } from '../features/appointments/appointment-whatsapp'
 import { useAppointments } from '../features/appointments/useAppointments'
 import { usePatients } from '../features/patients/usePatients'
+import { formatPhonePY } from '../lib/format'
+import { isWhatsAppConfigured, sendAppointmentReminder } from '../services/whatsapp'
 
 type FormState =
   | { mode: 'create'; date: string }
@@ -58,6 +60,8 @@ export default function AppointmentsPage() {
   const [formState, setFormState] = useState<FormState>(null)
   const [cancelTarget, setCancelTarget] = useState<AppointmentWithPatient | null>(null)
   const [pendingId, setPendingId] = useState<string | null>(null)
+  /** Cita cuyo recordatorio está viajando a Evolution API. */
+  const [reminderPendingId, setReminderPendingId] = useState<string | null>(null)
   const [isCancelling, setIsCancelling] = useState(false)
   const [cancelError, setCancelError] = useState<string | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
@@ -200,6 +204,41 @@ export default function AppointmentsPage() {
     }
   }
 
+  /**
+   * Envía el recordatorio por Evolution API (WhatsApp de la clínica).
+   *
+   * Al volver bien se guarda `reminder_sent_at` como auditoría; si ese guardado
+   * falla no se muestra error porque el mensaje ya salió del teléfono de la
+   * clínica.
+   */
+  async function handleSendReminder(appointment: AppointmentWithPatient) {
+    if (reminderPendingId) return
+
+    clearMessages()
+    setReminderPendingId(appointment.id)
+
+    try {
+      const result = await sendAppointmentReminder(appointment, appointment.patient)
+
+      setNotice(
+        `Recordatorio enviado por WhatsApp a ${getAppointmentPatientName(appointment)} (${formatPhonePY(result.number)}).`,
+      )
+
+      markReminderSent(appointment.id)
+        .then(() => patchAppointment(appointment.id, { reminder_sent_at: result.sentAt }))
+        .catch(() => undefined)
+    } catch (cause) {
+      setActionError(
+        cause instanceof Error
+          ? cause.message
+          : 'No se pudo enviar el recordatorio por WhatsApp. Intentá de nuevo.',
+      )
+    } finally {
+      setReminderPendingId(null)
+    }
+  }
+
+  /** Alternativa manual: abre WhatsApp Web/App con el mensaje ya escrito. */
   function handleWhatsApp(appointment: AppointmentWithPatient) {
     const url = buildReminderUrl(appointment)
 
@@ -214,15 +253,8 @@ export default function AppointmentsPage() {
 
     setActionError(null)
     setNotice(
-      `Se abrió WhatsApp con el recordatorio para ${getAppointmentPatientName(appointment)}.`,
+      `Se abrió WhatsApp con el recordatorio para ${getAppointmentPatientName(appointment)}. Enviá el mensaje desde el chat.`,
     )
-
-    // La marca de recordatorio es auditoría: si falla, el chat ya se abrió igual.
-    const sentAt = new Date().toISOString()
-
-    markReminderSent(appointment.id)
-      .then(() => patchAppointment(appointment.id, { reminder_sent_at: sentAt }))
-      .catch(() => undefined)
   }
 
 
@@ -287,6 +319,14 @@ export default function AppointmentsPage() {
           </div>
         )}
 
+        {!isWhatsAppConfigured() && (
+          <div className="border-b border-amber-100 bg-amber-50 px-4 py-2.5 text-xs text-amber-800 sm:px-5">
+            El envío automático de recordatorios está desactivado: falta configurar Evolution API
+            (`VITE_EVOLUTION_API_URL`, `VITE_EVOLUTION_API_KEY` y `VITE_EVOLUTION_INSTANCE` en el
+            `.env`). Mientras tanto, el botón de chat abre WhatsApp Web con el mensaje escrito.
+          </div>
+        )}
+
         {patientsError && (
           <div className="flex flex-wrap items-center gap-2 border-b border-amber-100 bg-amber-50 px-4 py-2.5 text-xs text-amber-800 sm:px-5">
             <span>No se pudieron cargar los pacientes para agendar: {patientsError}</span>
@@ -342,10 +382,12 @@ export default function AppointmentsPage() {
           <AgendaList
             groups={groups}
             pendingId={pendingId}
+            reminderPendingId={reminderPendingId}
             onEdit={openEdit}
             onStatusChange={handleStatusChange}
             onCancel={openCancel}
             onWhatsApp={handleWhatsApp}
+            onSendReminder={handleSendReminder}
           />
         )}
       </section>
@@ -353,8 +395,9 @@ export default function AppointmentsPage() {
 
       <p className="text-xs leading-relaxed text-slate-400">
         Los cambios de estado se guardan al instante en Supabase (con fecha de check-in, atención o
-        motivo de cancelación). El botón «Recordar» abre WhatsApp con un mensaje listo para enviar
-        al teléfono del paciente.
+        motivo de cancelación). El botón «Recordar» envía el recordatorio por WhatsApp desde el
+        número de la clínica (Evolution API); el botón de chat abre WhatsApp Web con el mensaje
+        escrito para enviarlo a mano.
       </p>
 
       {formState && (

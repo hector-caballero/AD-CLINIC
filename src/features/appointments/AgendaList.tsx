@@ -5,6 +5,7 @@ import {
   Loader2,
   LogIn,
   MessageCircle,
+  MessageCircleMore,
   Pencil,
   RotateCcw,
   ShieldAlert,
@@ -33,10 +34,15 @@ type AgendaListProps = {
   groups: AgendaDayGroup[]
   /** Cita con una actualización en curso (bloquea sus botones). */
   pendingId: string | null
+  /** Cita cuyo recordatorio está viajando a Evolution API. */
+  reminderPendingId: string | null
   onEdit: (appointment: AppointmentWithPatient) => void
   onStatusChange: (appointment: AppointmentWithPatient, status: AppointmentStatus) => void
   onCancel: (appointment: AppointmentWithPatient) => void
+  /** Abre WhatsApp Web/App con el mensaje ya escrito (envío manual). */
   onWhatsApp: (appointment: AppointmentWithPatient) => void
+  /** Envía el recordatorio automático por Evolution API. */
+  onSendReminder: (appointment: AppointmentWithPatient) => void
 }
 
 const ACTION_ICONS: Record<AppointmentStatus, typeof RotateCcw> = {
@@ -59,10 +65,12 @@ const ACTION_TONES = {
 export function AgendaList({
   groups,
   pendingId,
+  reminderPendingId,
   onEdit,
   onStatusChange,
   onCancel,
   onWhatsApp,
+  onSendReminder,
 }: AgendaListProps) {
   return (
     <div className="divide-y divide-slate-200">
@@ -91,10 +99,12 @@ export function AgendaList({
                   key={appointment.id}
                   appointment={appointment}
                   isPending={pendingId === appointment.id}
+                  isReminding={reminderPendingId === appointment.id}
                   onEdit={onEdit}
                   onStatusChange={onStatusChange}
                   onCancel={onCancel}
                   onWhatsApp={onWhatsApp}
+                  onSendReminder={onSendReminder}
                 />
               ))}
             </ul>
@@ -105,18 +115,25 @@ export function AgendaList({
   )
 }
 
-type AppointmentRowProps = Omit<AgendaListProps, 'groups' | 'pendingId'> & {
+type AppointmentRowProps = Omit<
+  AgendaListProps,
+  'groups' | 'pendingId' | 'reminderPendingId'
+> & {
   appointment: AppointmentWithPatient
   isPending: boolean
+  /** El recordatorio de WhatsApp está viajando a Evolution API. */
+  isReminding: boolean
 }
 
 function AppointmentRow({
   appointment,
   isPending,
+  isReminding,
   onEdit,
   onStatusChange,
   onCancel,
   onWhatsApp,
+  onSendReminder,
 }: AppointmentRowProps) {
   const meta = APPOINTMENT_STATUS_META[appointment.status]
   const actions = APPOINTMENT_ACTIONS[appointment.status]
@@ -126,9 +143,18 @@ function AppointmentRow({
   const end = formatAppointmentTime(appointment.ends_at)
   const duration = minutesBetween(appointment.starts_at, appointment.ends_at)
   const allergies = (patient?.allergies ?? []).filter(Boolean)
-  const canRemind = getReminderNumber(patient) !== null
+  const hasReminderPhone = getReminderNumber(patient) !== null
   const isOverdue = ACTIVE_STATUSES.includes(appointment.status) && isPastAppointment(appointment)
   const isClosed = appointment.status === 'cancelled' || appointment.status === 'no_show'
+  /** Recordar solo tiene sentido mientras el paciente todavía debe venir. */
+  const isRemindable =
+    appointment.status === 'scheduled' || appointment.status === 'confirmed'
+  const canRemind = hasReminderPhone && isRemindable
+  const remindTitle = !hasReminderPhone
+    ? 'El paciente no tiene un teléfono válido para WhatsApp'
+    : isRemindable
+      ? 'Enviar el recordatorio por WhatsApp desde el número de la clínica'
+      : 'La cita ya no está pendiente: solo se recuerdan citas programadas o confirmadas'
 
   return (
     <li
@@ -188,8 +214,9 @@ function AppointmentRow({
           </p>
         )}
         {appointment.reminder_sent_at && (
-          <p className="mt-1 text-[11px] text-slate-400">
-            Recordatorio de WhatsApp abierto a las{' '}
+          <p className="mt-1 inline-flex items-center gap-1 text-[11px] font-medium text-emerald-600">
+            <BadgeCheck className="size-3" aria-hidden="true" />
+            Recordatorio de WhatsApp enviado a las{' '}
             {formatAppointmentTime(appointment.reminder_sent_at)}
           </p>
         )}
@@ -236,17 +263,34 @@ function AppointmentRow({
         <div className="flex items-center gap-1.5">
           <button
             type="button"
+            onClick={() => onSendReminder(appointment)}
+            disabled={!canRemind || isReminding || isPending}
+            title={remindTitle}
+            aria-label={`Enviar recordatorio por WhatsApp a ${patientName} para la cita de las ${start}`}
+            aria-busy={isReminding}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-700 transition-colors hover:bg-emerald-100 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-50 disabled:text-slate-400"
+          >
+            {isReminding ? (
+              <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />
+            ) : (
+              <MessageCircle className="size-3.5" aria-hidden="true" />
+            )}
+            {isReminding ? 'Enviando…' : 'Recordar'}
+          </button>
+
+          <button
+            type="button"
             onClick={() => onWhatsApp(appointment)}
             disabled={!canRemind}
             title={
               canRemind
-                ? 'Abrir WhatsApp con el recordatorio de la cita'
-                : 'El paciente no tiene un teléfono válido para WhatsApp'
+                ? 'Abrir WhatsApp Web con el mensaje escrito (envío manual)'
+                : remindTitle
             }
-            className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-700 transition-colors hover:bg-emerald-100 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-50 disabled:text-slate-400"
+            aria-label={`Abrir WhatsApp con el recordatorio de ${patientName}`}
+            className="rounded-lg border border-slate-300 bg-white/85 p-1.5 text-emerald-600 transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:text-slate-300"
           >
-            <MessageCircle className="size-3.5" aria-hidden="true" />
-            Recordar
+            <MessageCircleMore className="size-3.5" aria-hidden="true" />
           </button>
 
           <button

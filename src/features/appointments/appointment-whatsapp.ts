@@ -1,61 +1,25 @@
-import type { AppointmentPatient, AppointmentWithPatient } from './appointment-types'
+import {
+  CLINIC_NAME,
+  formatReminderDate,
+  getWhatsAppNumber,
+} from '../../services/whatsapp'
+import type { AppointmentWithPatient } from './appointment-types'
 import { formatAppointmentTime } from './appointment-dates'
 
 /**
- * Recordatorio por WhatsApp.
+ * Enlaces manuales de WhatsApp (`https://wa.me/<número>`).
  *
- * `https://wa.me/<número>` exige el número en formato internacional, sin `+`,
- * sin espacios ni guiones: los móviles paraguayos `0981 123 456` se convierten
- * en `595981123456`. El mensaje viaja en `?text=` codificado.
+ * Es el camino alternativo al envío automático de `src/services/whatsapp.ts`
+ * (Evolution API): abre WhatsApp Web/App con el mensaje ya escrito para que la
+ * recepcionista lo revise y lo envíe a mano. La normalización del número vive
+ * en el servicio, así ambos caminos usan exactamente el mismo formato
+ * (`0981 123 456` → `595981123456`).
  */
 
-export const CLINIC_NAME = 'AD Clinic'
+export { CLINIC_NAME, formatReminderDate }
 
-const REMINDER_DATE = new Intl.DateTimeFormat('es-PY', {
-  weekday: 'long',
-  day: 'numeric',
-  month: 'long',
-})
-
-/**
- * Teléfono local/internacional → número de WhatsApp.
- *
- * Devuelve `null` si no hay dígitos suficientes: un enlace a un número truncado
- * abre un chat inexistente.
- */
-export function toWhatsAppNumber(phone: string | null | undefined): string | null {
-  const digits = (phone ?? '').replace(/\D+/g, '')
-
-  if (!digits) return null
-
-  // Ya viene con código de país (`+595 981 123 456`).
-  if (digits.startsWith('595')) return digits.length >= 11 ? digits : null
-
-  // Móvil con el 0 inicial (`0981 123 456` → 10 dígitos).
-  if (digits.startsWith('0')) return digits.length >= 9 ? `595${digits.slice(1)}` : null
-
-  // Móvil sin el 0 (`981 123 456`).
-  if (digits.startsWith('9')) return digits.length >= 9 ? `595${digits}` : null
-
-  // Fijo de Asunción (`021 123 456` → 9 dígitos) u otros internos.
-  return digits.length >= 8 ? `595${digits}` : null
-}
-
-/** Teléfono principal y, si no sirve, el alternativo. */
-export function getReminderNumber(patient: AppointmentPatient | null): string | null {
-  if (!patient) return null
-
-  return toWhatsAppNumber(patient.phone) ?? toWhatsAppNumber(patient.phone_alt)
-}
-
-/** `jueves 29 de octubre` (hora local). */
-export function formatReminderDate(startsAt: string): string {
-  const date = new Date(startsAt)
-
-  if (Number.isNaN(date.getTime())) return '—'
-
-  return REMINDER_DATE.format(date)
-}
+/** Teléfono principal y, si no sirve, el alternativo (`595981123456`). */
+export const getReminderNumber = getWhatsAppNumber
 
 /** Mensaje precargado en WhatsApp con fecha, horario y motivo. */
 export function buildReminderMessage(appointment: AppointmentWithPatient): string {
