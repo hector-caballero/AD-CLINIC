@@ -1,9 +1,11 @@
 import { useMemo, useState } from 'react'
 import { AlertCircle, Loader2, RefreshCw, SearchX, Users, X } from 'lucide-react'
 import { ConfirmDialog } from '../components/ui/ConfirmDialog'
+import { PatientAnamnesisModal } from '../features/patients/PatientAnamnesisModal'
 import { PatientFormModal } from '../features/patients/PatientFormModal'
 import { PatientsTable } from '../features/patients/PatientsTable'
 import { PatientsToolbar } from '../features/patients/PatientsToolbar'
+import type { MedicalHistory } from '../features/patients/anamnesis-types'
 import { filterPatients } from '../features/patients/filter-patients'
 import {
   getPatientFullName,
@@ -37,6 +39,7 @@ export default function PatientsPage() {
   const [isDeleting, setIsDeleting] = useState(false)
   const [deleteError, setDeleteError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
+  const [anamnesisTarget, setAnamnesisTarget] = useState<Patient | null>(null)
 
   const counts = useMemo(
     () => ({
@@ -71,6 +74,28 @@ export default function PatientsPage() {
 
   function closeForm() {
     setFormState(null)
+  }
+
+  function openAnamnesis(patient: Patient) {
+    setNotice(null)
+    setAnamnesisTarget(patient)
+  }
+
+  function closeAnamnesis() {
+    setAnamnesisTarget(null)
+  }
+
+  function handleAnamnesisSaved(record: MedicalHistory) {
+    const consent = record.consent_signed_at
+      ? 'consentimiento firmado'
+      : 'consentimiento sin firmar'
+
+    setNotice(
+      anamnesisTarget
+        ? `Se guardó la historia clínica de ${getPatientFullName(anamnesisTarget)} (${consent}).`
+        : `Se guardó la historia clínica (${consent}).`,
+    )
+    setAnamnesisTarget(null)
   }
 
   function handleSaved(patient: Patient, mode: 'create' | 'edit') {
@@ -229,7 +254,12 @@ export default function PatientsPage() {
               )}
             </div>
 
-            <PatientsTable patients={visiblePatients} onEdit={openEdit} onDelete={openDelete} />
+            <PatientsTable
+              patients={visiblePatients}
+              onEdit={openEdit}
+              onOpenAnamnesis={openAnamnesis}
+              onDelete={openDelete}
+            />
           </>
         )}
       </section>
@@ -245,6 +275,15 @@ export default function PatientsPage() {
           patient={formState.mode === 'edit' ? formState.patient : null}
           onClose={closeForm}
           onSaved={handleSaved}
+        />
+      )}
+
+      {anamnesisTarget && (
+        <PatientAnamnesisModal
+          key={anamnesisTarget.id}
+          patient={anamnesisTarget}
+          onClose={closeAnamnesis}
+          onSaved={handleAnamnesisSaved}
         />
       )}
 

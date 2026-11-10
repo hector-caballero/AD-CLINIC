@@ -1,4 +1,4 @@
-import { Mail, Pencil, ShieldAlert, Trash2 } from 'lucide-react'
+import { ClipboardList, Mail, Pencil, ShieldAlert, Trash2 } from 'lucide-react'
 import { formatPatientDocument, formatPhonePY, getInitials } from '../../lib/format'
 import { getPatientFullName, type Patient, type PatientStatus } from './patient-types'
 
@@ -61,13 +61,19 @@ function AllergyChips({ patient }: { patient: Patient }) {
 type PatientsTableProps = {
   patients: Patient[]
   onEdit: (patient: Patient) => void
+  onOpenAnamnesis: (patient: Patient) => void
   onDelete: (patient: Patient) => void
 }
 
 const HEAD_CLASS = 'px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500'
 
 /** Listado responsivo: tabla en `md+` y tarjetas en móvil. */
-export function PatientsTable({ patients, onEdit, onDelete }: PatientsTableProps) {
+export function PatientsTable({
+  patients,
+  onEdit,
+  onOpenAnamnesis,
+  onDelete,
+}: PatientsTableProps) {
   return (
     <>
       <div className="hidden overflow-x-auto md:block">
@@ -131,6 +137,15 @@ export function PatientsTable({ patients, onEdit, onDelete }: PatientsTableProps
                     <div className="flex items-center justify-end gap-1">
                       <button
                         type="button"
+                        onClick={() => onOpenAnamnesis(patient)}
+                        aria-label={`Abrir la historia clínica de ${fullName}`}
+                        title="Historia clínica / anamnesis"
+                        className="rounded-lg p-2 text-slate-400 transition-colors hover:bg-emerald-50 hover:text-emerald-700"
+                      >
+                        <ClipboardList className="size-4" aria-hidden="true" />
+                      </button>
+                      <button
+                        type="button"
                         onClick={() => onEdit(patient)}
                         aria-label={`Editar la ficha de ${fullName}`}
                         title="Editar"
@@ -190,6 +205,15 @@ export function PatientsTable({ patients, onEdit, onDelete }: PatientsTableProps
                 </div>
 
                 <div className="mt-3 flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => onOpenAnamnesis(patient)}
+                    aria-label={`Abrir la historia clínica de ${fullName}`}
+                    className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-medium text-emerald-800 transition-colors hover:bg-emerald-100"
+                  >
+                    <ClipboardList className="size-3.5" aria-hidden="true" />
+                    Historia
+                  </button>
                   <button
                     type="button"
                     onClick={() => onEdit(patient)}

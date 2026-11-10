@@ -52,9 +52,16 @@ Copy-Item .env.example .env
 | `VITE_EVOLUTION_API_URL` | URL base de Evolution API (WhatsApp de la clínica), sin `/` final. |
 | `VITE_EVOLUTION_API_KEY` | `apikey` global de Evolution API (`AUTHENTICATION_API_KEY`). |
 | `VITE_EVOLUTION_INSTANCE` | Nombre de la instancia conectada (por ejemplo `ad-clinic`). |
+| `VITE_GEMINI_API_KEY` | API key de Google AI Studio para el dictado de la anamnesis. Opcional: sin ella la ficha se completa a mano. |
+| `VITE_GEMINI_MODEL` | Modelo de Gemini (por defecto `gemini-flash-latest`). Opcional. |
 
 Las tres variables de Evolution son opcionales: sin ellas la agenda funciona igual y solo se
 desactiva el envío automático de recordatorios (con un aviso visible en `/agenda`).
+
+`VITE_GEMINI_API_KEY` también es opcional: si falta, la historia clínica se completa a mano y el
+panel de dictado muestra el aviso. Como viaja en el bundle (Vite solo inyecta `VITE_*`), conviene
+una clave exclusiva de la clínica restringida por *HTTP referrers* a su dominio y habilitada solo
+para la *Generative Language API*.
 
 Los archivos `.env*` están en `.gitignore`; solo se versiona `.env.example`.
 
@@ -147,6 +154,7 @@ Las migraciones viven en `supabase/migrations` y se aplican **en orden**:
 | `20261104120000_appointment_reschedule_status.sql` | Agrega el valor `reschedule_requested` al enum `appointment_status`. Va solo en su archivo porque PostgreSQL no permite usar un valor de enum nuevo dentro de la misma transacción que lo crea. |
 | `20261104120100_appointment_responses.sql` | Tabla de auditoría `appointment_responses` (teléfono, texto recibido, elección, resultado, `payload` sin credenciales) con `wa_message_id` **único** —es la llave de idempotencia del webhook— y las columnas `appointments.patient_response`, `patient_response_at` y `reschedule_requested_at`. |
 | `20261104120200_apply_appointment_response.sql` | RPC `apply_appointment_response(...)`: valida el mensaje, busca al paciente por teléfono (últimos 9 dígitos), aplica `1 → confirmed` / `2 → reschedule_requested` sobre la próxima cita pendiente y devuelve el resultado. Todo en una transacción, así que el cambio de estado y la fila de auditoría se guardan juntos. |
+| `20261104130000_patient_medical_history.sql` | Historia clínica: tabla `patient_medical_history` (una ficha por paciente, `unique (patient_id)`), trigger de `updated_at`, `child_weight_kg` con CHECK de rango, sello del consentimiento informado y RLS para el personal autenticado. |
 
 Se aplican de cualquiera de estas dos formas:
 
@@ -583,5 +591,45 @@ por evento con el teléfono enmascarado y el estado aplicado.
 - **Quitar el enum:** PostgreSQL no permite borrar un valor de enum; para revertir del todo habría
   que recrear el tipo (no se recomienda con datos en producción). Lo seguro es dejar de usar el
   estado en la UI.
+
+### 11. Historia clínica y anamnesis digital
+
+El botón **Historia clínica** (`ClipboardList`) de `/pacientes` —en las acciones de la fila en
+escritorio y en la tarjeta en móvil— abre `PatientAnamnesisModal`, la versión digital de la hoja de
+anamnesis + consentimiento informado que se completa en la primera consulta.
+
+- **Estructura:** una fila por paciente en `patient_medical_history` (`unique (patient_id)`), así
+  que el formulario guarda con `upsert on conflict (patient_id)` y nunca acumula versiones. Cada
+  pregunta clínica es un Sí/No (`YesNoToggle`) y, al marcar «Sí», se despliega su detalle
+  (`FlagField`), igual que en el papel.
+- **Módulos:** `anamnesis-types.ts` define `MedicalHistory`, `AnamnesisFormValues` y las
+  conversiones fila ↔ formulario ↔ payload; `anamnesis-service.ts` expone `fetchMedicalHistory` /
+  `saveMedicalHistory`; `anamnesis-format.ts` formatea las fechas (`formatHistoryDateTime` para
+  `updated_at`, `formatConsentSignedAt` para la firma) y `anamnesis-errors.ts` traduce los errores
+  de Supabase a mensajes accionables.
+- **Dictado asistido (`src/services/anamnesis-ai.ts`):** «Dictar con IA» transcribe en español
+  (`es-PY`) con la Web Speech API del navegador y se reinicia sola cuando Chrome corta la sesión
+  por silencio; «Detener y procesar» envía el texto a Gemini Flash en JSON Mode y vuelca las
+  casillas en el formulario para que el doctor las valide. Estados `idle` / `listening` /
+  `processing`, con «Descartar dictado» para empezar de nuevo. Si el navegador no soporta dictado,
+  falta `VITE_GEMINI_API_KEY` o no hay conexión, el botón queda deshabilitado con el motivo a la
+  vista y la ficha se completa a mano.
+- **Modelo de Gemini:** `gemini-flash-latest` por defecto (se puede fijar otro con
+  `VITE_GEMINI_MODEL`). Si el modelo responde `404` se prueba la cadena de respaldos
+  (`gemini-2.5-flash`, `gemini-1.5-flash`) y se recuerda el que funcionó, porque Google retira
+  versiones sin aviso. La clave viaja en el header `x-goog-api-key` (no en la query) y la petición
+  tiene un timeout de 30 s.
+- **Consentimiento informado:** el texto y la casilla están en el formulario, pero la IA **nunca**
+  la marca. `consent_signed_at` lo sella el trigger `handle_medical_history_consent()` al aceptar y
+  lo limpia al desmarcar, así que la fecha es la del servidor y no la del navegador; la UI muestra
+  «Firmado el …», «Se firmará al guardar la ficha» o «Sin firmar».
+- **Peso pediátrico:** `child_weight_kg` es `numeric(5,2)` con CHECK (`> 0 and <= 250`); el campo
+  acepta coma o punto y queda `NULL` en adultos.
+- **RLS:** mismo criterio que el resto de las tablas clínicas — todo el personal autenticado lee y
+  escribe; el rol `anon` no tiene acceso.
+
+> La migración `20261104130000_patient_medical_history.sql` reutiliza `public.handle_updated_at()`
+> del esquema inicial, así que debe aplicarse después de `20261028090000_init_ad_clinic_schema.sql`.
+
 
 
