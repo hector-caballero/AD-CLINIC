@@ -9,9 +9,11 @@ import { getPatientFullName, type Patient } from '../features/patients/patient-t
 import { usePatients } from '../features/patients/usePatients'
 import { OdontogramChart } from '../features/odontogram/OdontogramChart'
 import { ChargePlanModal, type PlanChargeSubmission } from '../features/odontogram/ChargePlanModal'
+import { OdontogramVoiceBar } from '../features/odontogram/OdontogramVoiceBar'
 import { ToothTreatmentModal } from '../features/odontogram/ToothTreatmentModal'
 import { TreatmentBudgetPanel } from '../features/odontogram/TreatmentBudgetPanel'
 import { registerTreatmentCharge } from '../features/cash/cash-service'
+import { describeVoiceCommand, type OdontogramVoiceCommand } from '../features/odontogram/odontogram-voice-service'
 import type { BilledItemLink } from '../features/odontogram/odontogram-service'
 import { DENTITION_OPTIONS } from '../features/odontogram/odontogram-teeth'
 import {
@@ -116,6 +118,22 @@ export default function OdontogramPage() {
               item.treatment?.name ?? 'procedimiento'
             } guardado en el presupuesto.`,
     })
+  }
+
+  /**
+   * Dictado manos libres: guarda el comando con el mismo `saveItem` del modal y
+   * deja el aviso `Pieza 16 (Oclusal) → …` en la página. Si el guardado falla,
+   * el error se relanza para que la barra del dictado muestre el motivo.
+   */
+  async function handleVoiceApply(draft: OdontogramDraft, command: OdontogramVoiceCommand) {
+    await odontogram.saveItem(draft)
+
+    setNotice({ tone: 'success', message: describeVoiceCommand(command) })
+  }
+
+  /** El dictado no resolvió el procedimiento: se completa en el modal de la pieza. */
+  function handleVoiceManualEntry(selection: ToothSelection) {
+    setSelection(selection)
   }
 
   async function handleChangeStatus(item: OdontogramItem, status: OdontogramItemStatus) {
@@ -384,6 +402,14 @@ export default function OdontogramPage() {
               </p>
             )}
           </section>
+
+          {canEdit && (
+            <OdontogramVoiceBar
+              dentition={dentition}
+              onApply={handleVoiceApply}
+              onRequestManualEntry={handleVoiceManualEntry}
+            />
+          )}
 
           <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_24rem]">
             <section

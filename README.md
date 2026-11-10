@@ -52,7 +52,7 @@ Copy-Item .env.example .env
 | `VITE_EVOLUTION_API_URL` | URL base de Evolution API (WhatsApp de la clínica), sin `/` final. |
 | `VITE_EVOLUTION_API_KEY` | `apikey` global de Evolution API (`AUTHENTICATION_API_KEY`). |
 | `VITE_EVOLUTION_INSTANCE` | Nombre de la instancia conectada (por ejemplo `ad-clinic`). |
-| `VITE_GEMINI_API_KEY` | API key de Google AI Studio para el dictado de la anamnesis. Opcional: sin ella la ficha se completa a mano. |
+| `VITE_GEMINI_API_KEY` | API key de Google AI Studio para los dictados asistidos (historia clínica y odontograma). Opcional: sin ella la ficha se completa a mano y el odontograma solo entiende los comandos del parser rápido. |
 | `VITE_GEMINI_MODEL` | Modelo de Gemini (por defecto `gemini-flash-latest`). Opcional. |
 
 Las tres variables de Evolution son opcionales: sin ellas la agenda funciona igual y solo se
@@ -237,7 +237,7 @@ src/
 │  ├─ RequireAuth.tsx         guard de rutas privadas
 │  └─ RequireAdmin.tsx        guard de rutas solo para administración
 ├─ features/treatments/       catálogo: servicio, hook, toolbar, tabla, modal
-├─ features/odontogram/       odontograma SVG, servicio de ítems, presupuesto y cobro del plan
+├─ features/odontogram/       odontograma SVG, servicio de ítems, presupuesto, dictado por voz y cobro del plan
 ├─ features/team/             equipo: servicio, hook, toolbar, tabla y modales
 ├─ components/
 │  ├─ layout/AppLayout.tsx       sidebar fija (lg+) + drawer móvil + header
@@ -331,6 +331,18 @@ Se abre con el buscador de pacientes o por enlace directo: `/odontograma?pacient
   desglose pieza / cara / procedimiento, con acciones para cambiar el estado o quitar la línea.
 - **Sin duplicados:** un mismo tratamiento no se repite sobre la misma pieza y cara; volver a
   guardarlo actualiza la línea existente. Un índice único parcial lo garantiza en la base.
+- **Dictado manos libres:** la barra `OdontogramVoiceBar` escucha en continuo y registra cada
+  comando sin usar el mouse («pieza 16 oclusal caries», «pieza 46 mesial resina pendiente»,
+  «pieza 18 oclusal flúor presupuestado», «pieza 21 ausente»). El parser
+  (`odontogram-voice-service.ts`) lee la pieza en FDI (dígitos o palabras: «dieciséis», «cuarenta
+  y seis»), la cara (oclusal/incisal, vestibular/bucal/labial, lingual/palatino, mesial, distal),
+  el estado y el procedimiento; un hallazgo sin estado explícito queda `pending`. Si el comando no
+  alcanza, Gemini Flash lo reinterpreta con el catálogo en el prompt y devuelve un nombre que
+  exista en la clínica. El precio se copia del catálogo y el registro entra con las mismas
+  acciones del modal de la pieza, así que el SVG y el presupuesto se actualizan en vivo; el aviso
+  confirma `Pieza 16 (Oclusal) → Obturación con resina · Pendiente`. Si el procedimiento no está
+  en el catálogo (o empata entre varios, o no tiene precio), la ficha de la pieza se abre con la
+  selección hecha. Solo `dentist` y `admin` ven la barra.
 - **Cobro del plan:** «Cobrar este plan» abre `ChargePlanModal`, permite elegir las líneas con
   precio y sin cobro (por defecto las presupuestadas) y las envía a la caja con el mismo flujo que
   un cobro de tratamiento (`registerTreatmentCharge`): un `patient_treatments` + un `charge` por
@@ -614,9 +626,11 @@ anamnesis + consentimiento informado que se completa en la primera consulta.
   `processing`, con «Descartar dictado» para empezar de nuevo. Si el navegador no soporta dictado,
   falta `VITE_GEMINI_API_KEY` o no hay conexión, el botón queda deshabilitado con el motivo a la
   vista y la ficha se completa a mano.
-- **Modelo de Gemini:** `gemini-flash-latest` por defecto (se puede fijar otro con
-  `VITE_GEMINI_MODEL`). Si el modelo responde `404` se prueba la cadena de respaldos
-  (`gemini-2.5-flash`, `gemini-1.5-flash`) y se recuerda el que funcionó, porque Google retira
+- **Modelo de Gemini:** el cliente vive en `src/services/gemini-flash.ts` (lo comparten el
+  dictado de la anamnesis y el del odontograma). Se prueba `VITE_GEMINI_MODEL` (por ejemplo
+  `gemini-3.5-flash-lite`), el último modelo que funcionó, el alias `gemini-flash-latest` y los
+  respaldos (`gemini-2.5-flash-lite`, `gemini-2.5-flash`, `gemini-1.5-flash`); si un modelo
+  responde `404` se pasa al siguiente y se recuerda el que funcionó, porque Google retira
   versiones sin aviso. La clave viaja en el header `x-goog-api-key` (no en la query) y la petición
   tiene un timeout de 30 s.
 - **Consentimiento informado:** el texto y la casilla están en el formulario, pero la IA **nunca**
