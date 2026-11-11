@@ -22,6 +22,7 @@ import {
   type AppointmentWithPatient,
 } from '../features/appointments/appointment-types'
 import {
+  callAppointmentToRoom,
   markReminderSent,
   updateAppointmentStatus,
 } from '../features/appointments/appointments-service'
@@ -62,6 +63,8 @@ export default function AppointmentsPage() {
   const [pendingId, setPendingId] = useState<string | null>(null)
   /** Cita cuyo recordatorio está viajando a Evolution API. */
   const [reminderPendingId, setReminderPendingId] = useState<string | null>(null)
+  /** Cita cuya llamada a sala está viajando a Supabase. */
+  const [callingId, setCallingId] = useState<string | null>(null)
   const [isCancelling, setIsCancelling] = useState(false)
   const [cancelError, setCancelError] = useState<string | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
@@ -241,6 +244,39 @@ export default function AppointmentsPage() {
     }
   }
 
+  /**
+   * «Llamar a sala»: deja la cita en `checked_in` y marca `called_at`.
+   *
+   * La pantalla `/tv` escucha la tabla por Realtime, así que el nombre aparece
+   * en el televisor (con campanilla y voz) sin recargar nada. Si el paciente ya
+   * estaba en sala se conserva su hora de llegada.
+   */
+  async function handleCallToRoom(appointment: AppointmentWithPatient) {
+    if (callingId) return
+
+    clearMessages()
+    setCallingId(appointment.id)
+
+    try {
+      const updated = await callAppointmentToRoom(appointment)
+
+      applyAppointment(updated)
+      setNotice(
+        `Llamando a ${getAppointmentPatientName(updated)}${
+          updated.room ? ` · ${updated.room}` : ''
+        }. La pantalla de sala ya muestra el aviso.`,
+      )
+    } catch (cause) {
+      setActionError(
+        cause instanceof Error
+          ? cause.message
+          : 'No se pudo llamar al paciente a sala. Intentá de nuevo.',
+      )
+    } finally {
+      setCallingId(null)
+    }
+  }
+
   /** Alternativa manual: abre WhatsApp Web/App con el mensaje ya escrito. */
   function handleWhatsApp(appointment: AppointmentWithPatient) {
     const url = buildReminderUrl(appointment)
@@ -386,11 +422,13 @@ export default function AppointmentsPage() {
             groups={groups}
             pendingId={pendingId}
             reminderPendingId={reminderPendingId}
+            callingId={callingId}
             onEdit={openEdit}
             onStatusChange={handleStatusChange}
             onCancel={openCancel}
             onWhatsApp={handleWhatsApp}
             onSendReminder={handleSendReminder}
+            onCallToRoom={handleCallToRoom}
           />
         )}
       </section>
@@ -400,7 +438,9 @@ export default function AppointmentsPage() {
         Los cambios de estado se guardan al instante en Supabase (con fecha de check-in, atención o
         motivo de cancelación). El botón «Recordar» envía el recordatorio por WhatsApp desde el
         número de la clínica (Evolution API); el botón de chat abre WhatsApp Web con el mensaje
-        escrito para enviarlo a mano.
+        escrito para enviarlo a mano. «Llamar a sala» anuncia al paciente en la pantalla del
+        televisor (<span className="font-medium text-slate-500">Pantalla de sala</span>), con
+        campanilla y voz.
       </p>
 
       {formState && (

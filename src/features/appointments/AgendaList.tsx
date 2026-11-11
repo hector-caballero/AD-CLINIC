@@ -3,6 +3,7 @@ import {
   Ban,
   CalendarClock,
   CheckCheck,
+  DoorOpen,
   Loader2,
   LogIn,
   MessageCircle,
@@ -12,6 +13,7 @@ import {
   RotateCcw,
   ShieldAlert,
   UserX,
+  Volume2,
 } from 'lucide-react'
 import { formatPatientDocument, formatPhonePY } from '../../lib/format'
 import {
@@ -26,6 +28,7 @@ import {
   APPOINTMENT_ACTIONS,
   APPOINTMENT_STATUS_META,
   PATIENT_RESPONSE_META,
+  canCallToRoom,
   canCancel,
   getAppointmentPatientName,
   type AppointmentStatus,
@@ -39,6 +42,8 @@ type AgendaListProps = {
   pendingId: string | null
   /** Cita cuyo recordatorio está viajando a Evolution API. */
   reminderPendingId: string | null
+  /** Cita cuya llamada a sala está viajando a Supabase. */
+  callingId: string | null
   onEdit: (appointment: AppointmentWithPatient) => void
   onStatusChange: (appointment: AppointmentWithPatient, status: AppointmentStatus) => void
   onCancel: (appointment: AppointmentWithPatient) => void
@@ -46,6 +51,8 @@ type AgendaListProps = {
   onWhatsApp: (appointment: AppointmentWithPatient) => void
   /** Envía el recordatorio automático por Evolution API. */
   onSendReminder: (appointment: AppointmentWithPatient) => void
+  /** Anuncia al paciente en la pantalla de sala (`/tv`). */
+  onCallToRoom: (appointment: AppointmentWithPatient) => void
 }
 
 const ACTION_ICONS: Record<AppointmentStatus, typeof RotateCcw> = {
@@ -70,11 +77,13 @@ export function AgendaList({
   groups,
   pendingId,
   reminderPendingId,
+  callingId,
   onEdit,
   onStatusChange,
   onCancel,
   onWhatsApp,
   onSendReminder,
+  onCallToRoom,
 }: AgendaListProps) {
   return (
     <div className="divide-y divide-slate-200">
@@ -104,11 +113,13 @@ export function AgendaList({
                   appointment={appointment}
                   isPending={pendingId === appointment.id}
                   isReminding={reminderPendingId === appointment.id}
+                  isCalling={callingId === appointment.id}
                   onEdit={onEdit}
                   onStatusChange={onStatusChange}
                   onCancel={onCancel}
                   onWhatsApp={onWhatsApp}
                   onSendReminder={onSendReminder}
+                  onCallToRoom={onCallToRoom}
                 />
               ))}
             </ul>
@@ -121,23 +132,27 @@ export function AgendaList({
 
 type AppointmentRowProps = Omit<
   AgendaListProps,
-  'groups' | 'pendingId' | 'reminderPendingId'
+  'groups' | 'pendingId' | 'reminderPendingId' | 'callingId'
 > & {
   appointment: AppointmentWithPatient
   isPending: boolean
   /** El recordatorio de WhatsApp está viajando a Evolution API. */
   isReminding: boolean
+  /** La llamada a sala está viajando a Supabase. */
+  isCalling: boolean
 }
 
 function AppointmentRow({
   appointment,
   isPending,
   isReminding,
+  isCalling,
   onEdit,
   onStatusChange,
   onCancel,
   onWhatsApp,
   onSendReminder,
+  onCallToRoom,
 }: AppointmentRowProps) {
   const meta = APPOINTMENT_STATUS_META[appointment.status]
   const actions = APPOINTMENT_ACTIONS[appointment.status]
@@ -162,6 +177,10 @@ function AppointmentRow({
     : isRemindable
       ? 'Enviar el recordatorio por WhatsApp desde el número de la clínica'
       : 'La cita ya no está pendiente: solo se recuerdan citas programadas o confirmadas'
+  /** Citas desde las que tiene sentido llamar a la sala. */
+  const canCall = canCallToRoom(appointment.status)
+  /** Ya se llamó al paciente: el botón pasa a «Volver a llamar». */
+  const wasCalled = appointment.called_at !== null
 
   return (
     <li
@@ -208,6 +227,18 @@ function AppointmentRow({
               Vencida
             </span>
           )}
+          {appointment.room && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-bronze-50 px-2 py-0.5 text-[11px] font-medium text-bronze-700 ring-1 ring-bronze-200">
+              <DoorOpen className="size-3" aria-hidden="true" />
+              {appointment.room}
+            </span>
+          )}
+          {appointment.called_at && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-brand-50 px-2 py-0.5 text-[11px] font-medium text-brand-700 ring-1 ring-brand-200">
+              <Volume2 className="size-3" aria-hidden="true" />
+              Llamado {formatAppointmentTime(appointment.called_at)}
+            </span>
+          )}
         </div>
 
         <p className="mt-0.5 text-sm text-slate-600">{appointment.reason}</p>
@@ -244,6 +275,36 @@ function AppointmentRow({
 
       <div className="flex flex-col gap-2 md:items-end">
         <div className="flex flex-wrap items-center gap-1.5">
+          {canCall && (
+            <button
+              type="button"
+              disabled={isPending || isCalling}
+              onClick={() => onCallToRoom(appointment)}
+              aria-busy={isCalling}
+              title={
+                wasCalled
+                  ? `Volver a llamar: la pantalla de sala ya lo mostró a las ${formatAppointmentTime(
+                      appointment.called_at ?? appointment.starts_at,
+                    )}`
+                  : 'Mostrar el llamado en la pantalla de sala y anunciarlo en voz alta'
+              }
+              aria-label={`Llamar a sala a ${patientName} a las ${start}`}
+              className={[
+                'inline-flex items-center gap-1 rounded-lg px-2.5 py-1 text-xs font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-60',
+                wasCalled
+                  ? 'border border-brand-300 bg-brand-50 text-brand-700 hover:bg-brand-100'
+                  : 'bg-brand-500 text-ink-950 shadow-sm shadow-brand-500/30 ring-1 ring-brand-600/25 hover:bg-brand-400',
+              ].join(' ')}
+            >
+              {isCalling ? (
+                <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />
+              ) : (
+                <Volume2 className="size-3.5" aria-hidden="true" />
+              )}
+              {isCalling ? 'Llamando…' : wasCalled ? 'Volver a llamar' : 'Llamar a sala'}
+            </button>
+          )}
+
           {actions.map((action) => {
             const Icon = ACTION_ICONS[action.status]
 

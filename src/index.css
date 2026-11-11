@@ -73,6 +73,28 @@
   --font-sans: system-ui, 'Segoe UI', Roboto, sans-serif;
   /* Serif editorial para el logotipo y los titulares de marca. */
   --font-display: Georgia, 'Iowan Old Style', 'Palatino Linotype', 'Times New Roman', serif;
+
+  /*
+   * Pulso dorado de la pantalla de sala (`/tv`): el anillo de la tarjeta de
+   * llamada crece y se desvanece. Se usa con `motion-safe:` y es puramente
+   * decorativo (el aviso real es la campanilla + la voz).
+   */
+  --animate-tv-ring: tv-ring 2.4s ease-out infinite;
+
+  @keyframes tv-ring {
+    0% {
+      opacity: 0.75;
+      transform: scale(1);
+    }
+    70% {
+      opacity: 0;
+      transform: scale(1.035);
+    }
+    100% {
+      opacity: 0;
+      transform: scale(1.035);
+    }
+  }
 }
 
 @layer base {

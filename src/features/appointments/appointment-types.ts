@@ -45,6 +45,10 @@ export type Appointment = {
   patient_response: PatientResponse | null
   patient_response_at: string | null
   reschedule_requested_at: string | null
+  /** Consultorio / box donde se atiende (`Box 1`, `Consultorio 2`…). */
+  room: string | null
+  /** Última llamada a sala: la escribe la acción «Llamar a sala». */
+  called_at: string | null
   created_at: string
   updated_at: string
 }
@@ -70,20 +74,26 @@ export type AppointmentWithPatient = Appointment & {
 /** Payload de alta/edición (el estado se gestiona con las acciones rápidas). */
 export type AppointmentInput = {
   patient_id: string
+  /** Odontólogo responsable (opcional: se elige del directorio del equipo). */
+  dentist_id: string | null
   starts_at: string
   ends_at: string
   reason: string
   notes: string | null
+  /** Consultorio / box donde se atiende (opcional). */
+  room: string | null
 }
 
 /** Valores del formulario: todo texto, porque los inputs no manejan `null`. */
 export type AppointmentFormValues = {
   patient_id: string
+  dentist_id: string
   date: string
   start_time: string
   end_time: string
   reason: string
   notes: string
+  room: string
 }
 
 const PATIENT_EMBED = [
@@ -99,6 +109,39 @@ const PATIENT_EMBED = [
 
 /** Columnas de la cita + `patient` embebido (join por `patient_id`). */
 export const APPOINTMENT_SELECT = [
+  'id',
+  'patient_id',
+  'dentist_id',
+  'starts_at',
+  'ends_at',
+  'status',
+  'reason',
+  'notes',
+  'cancellation_reason',
+  'checked_in_at',
+  'completed_at',
+  'reminder_sent_at',
+  'patient_response',
+  'patient_response_at',
+  'reschedule_requested_at',
+  'room',
+  'called_at',
+  'created_at',
+  'updated_at',
+  `patient:patients(${PATIENT_EMBED})`,
+].join(', ')
+
+/**
+ * Mismo select sin las columnas de la pantalla de sala (`room`, `called_at`).
+ *
+ * Es la red de seguridad mientras la migración
+ * `20261110100000_waiting_room_display.sql` no esté aplicada: PostgREST
+ * responde `42703`/`PGRST204` y tanto `/tv` como la agenda reintentan con este
+ * select en lugar de quedar en blanco (leer el día es el camino crítico).
+ * Guardar una cita o llamar a sala sí falla: ahí el error se muestra con el
+ * mensaje que traduce `appointment-errors.ts`.
+ */
+export const APPOINTMENT_SELECT_LEGACY = [
   'id',
   'patient_id',
   'dentist_id',
@@ -232,6 +275,28 @@ export function canCancel(status: AppointmentStatus): boolean {
     status === 'reschedule_requested' ||
     status === 'checked_in'
   )
+}
+
+/**
+ * Estados desde los que se puede llamar al paciente a la sala.
+ *
+ * - `checked_in`: ya está en recepción, la llamada solo marca `called_at`.
+ * - `scheduled` / `confirmed`: recepción lo llama y la misma acción lo deja en
+ *   `checked_in` (si no estaba marcado, igual aparece en el turnero).
+ * - `reschedule_requested` queda afuera a propósito: el paciente pidió mover la
+ *   cita, hay que hablar con él antes de llamarlo a consultorio.
+ */
+export const CALLABLE_STATUSES: AppointmentStatus[] = ['scheduled', 'confirmed', 'checked_in']
+
+export function canCallToRoom(status: AppointmentStatus): boolean {
+  return CALLABLE_STATUSES.includes(status)
+}
+
+/** `Box 1` → `Box 1`; texto vacío → `null` (la columna es opcional). */
+export function normalizeRoom(room: string | null | undefined): string | null {
+  const value = room?.trim()
+
+  return value ? value : null
 }
 
 export function getAppointmentPatientName(appointment: AppointmentWithPatient): string {

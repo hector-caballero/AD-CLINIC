@@ -21,6 +21,8 @@ export type AppointmentStatusPatch = {
   reschedule_requested_at?: string | null
   patient_response?: PatientResponse | null
   patient_response_at?: string | null
+  /** Se limpia al reabrir/reprogramar: el turnero deja de mostrar la llamada. */
+  called_at?: string | null
 }
 
 export function buildStatusPatch(
@@ -42,6 +44,13 @@ export function buildStatusPatch(
 
   if (status === 'completed') {
     patch.completed_at = now
+  }
+
+  // La marca de llamada solo tiene sentido mientras el paciente está en sala o
+  // ya fue atendido: al reabrir, cancelar o marcar inasistencia se borra para
+  // que la tele no siga anunciando a alguien que ya no está.
+  if (status !== 'checked_in' && status !== 'completed') {
+    patch.called_at = null
   }
 
   if (status === 'reschedule_requested') {
@@ -73,6 +82,41 @@ export function buildRescheduleResetPatch(): AppointmentStatusPatch {
     reschedule_requested_at: null,
     patient_response: null,
     patient_response_at: null,
+    called_at: null,
+  }
+}
+
+/**
+ * Payload de «Llamar a sala» (lo consume el turnero `/tv`).
+ *
+ * La acción siempre deja la cita en `checked_in`: si el paciente ya estaba en
+ * sala se conserva su hora de llegada; si no, se marca ahora. `called_at` se
+ * reescribe en cada llamada, así que volver a llamar re-dispara el aviso en la
+ * tele (el canal compara la marca anterior con la nueva).
+ */
+export type AppointmentCallPatch = {
+  status: 'checked_in'
+  checked_in_at: string
+  called_at: string
+  called_by: string | null
+  completed_at: null
+}
+
+export function buildCallPatch(options: {
+  now?: Date
+  /** Hora de llegada previa: si existe, no se pisa. */
+  checkedInAt?: string | null
+  /** Usuario que llama (auditoría). */
+  calledBy?: string | null
+}): AppointmentCallPatch {
+  const now = (options.now ?? new Date()).toISOString()
+
+  return {
+    status: 'checked_in',
+    checked_in_at: options.checkedInAt ?? now,
+    called_at: now,
+    called_by: options.calledBy ?? null,
+    completed_at: null,
   }
 }
 

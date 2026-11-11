@@ -68,3 +68,23 @@ export function getAppointmentErrorMessage(error: unknown): string {
 export function toAppointmentError(error: unknown): Error {
   return new Error(getAppointmentErrorMessage(error))
 }
+
+/**
+ * `true` si el error es «falta una columna de la pantalla de sala»
+ * (`room` / `called_at`), es decir, la migración
+ * `20261110100000_waiting_room_display.sql` todavía no se aplicó.
+ *
+ * La agenda y el turnero lo usan para reintentar con el select viejo en lugar de
+ * dejar la pantalla en blanco: leer la agenda es el camino crítico del día.
+ */
+export function isMissingWaitingRoomColumn(error: unknown): boolean {
+  if (!error) return false
+
+  const candidate = error as PostgrestLikeError
+
+  if (candidate.code === '42703' || candidate.code === 'PGRST204') return true
+
+  const message = candidate.message ?? ''
+
+  return /(room|called_at)/i.test(message) && /column/i.test(message)
+}

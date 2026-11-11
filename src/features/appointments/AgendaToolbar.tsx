@@ -1,4 +1,4 @@
-import { CalendarDays, ChevronLeft, ChevronRight, Plus } from 'lucide-react'
+import { CalendarDays, ChevronLeft, ChevronRight, MonitorPlay, Plus } from 'lucide-react'
 import type { AppointmentView } from './appointment-types'
 
 type AgendaSummary = {
@@ -119,14 +119,27 @@ export function AgendaToolbar({
           </div>
         </div>
 
-        <button
-          type="button"
-          onClick={onCreate}
-          className="inline-flex items-center justify-center gap-2 rounded-xl bg-brand-500 px-4 py-2.5 text-sm font-semibold text-ink-950 shadow-sm shadow-brand-500/30 ring-1 ring-brand-600/25 transition-colors hover:bg-brand-400"
-        >
-          <Plus className="size-4" aria-hidden="true" />
-          Nueva cita
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          <a
+            href="/tv"
+            target="_blank"
+            rel="noreferrer"
+            title="Abrir la pantalla de sala (turnero) en una pestaña nueva"
+            className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-300 bg-white/85 px-3.5 py-2.5 text-sm font-medium text-slate-700 shadow-sm transition-colors hover:bg-slate-50 hover:text-slate-900"
+          >
+            <MonitorPlay className="size-4" aria-hidden="true" />
+            Pantalla de sala
+          </a>
+
+          <button
+            type="button"
+            onClick={onCreate}
+            className="inline-flex items-center justify-center gap-2 rounded-xl bg-brand-500 px-4 py-2.5 text-sm font-semibold text-ink-950 shadow-sm shadow-brand-500/30 ring-1 ring-brand-600/25 transition-colors hover:bg-brand-400"
+          >
+            <Plus className="size-4" aria-hidden="true" />
+            Nueva cita
+          </button>
+        </div>
       </div>
 
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-slate-500">

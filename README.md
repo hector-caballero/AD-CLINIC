@@ -155,6 +155,7 @@ Las migraciones viven en `supabase/migrations` y se aplican **en orden**:
 | `20261104120100_appointment_responses.sql` | Tabla de auditoría `appointment_responses` (teléfono, texto recibido, elección, resultado, `payload` sin credenciales) con `wa_message_id` **único** —es la llave de idempotencia del webhook— y las columnas `appointments.patient_response`, `patient_response_at` y `reschedule_requested_at`. |
 | `20261104120200_apply_appointment_response.sql` | RPC `apply_appointment_response(...)`: valida el mensaje, busca al paciente por teléfono (últimos 9 dígitos), aplica `1 → confirmed` / `2 → reschedule_requested` sobre la próxima cita pendiente y devuelve el resultado. Todo en una transacción, así que el cambio de estado y la fila de auditoría se guardan juntos. |
 | `20261104130000_patient_medical_history.sql` | Historia clínica: tabla `patient_medical_history` (una ficha por paciente, `unique (patient_id)`), trigger de `updated_at`, `child_weight_kg` con CHECK de rango, sello del consentimiento informado y RLS para el personal autenticado. |
+| `20261110100000_waiting_room_display.sql` | Pantalla de sala: columnas `room`, `called_at` y `called_by` en `appointments` (+ CHECK de largo y índice parcial de los que están en sala), `appointments` agregada a la publicación `supabase_realtime` con `replica identity full`, y vista `staff_directory` (id, nombre y rol del personal activo) para el selector de profesional y el turnero. |
 
 Se aplican de cualquiera de estas dos formas:
 
@@ -238,7 +239,8 @@ src/
 │  └─ RequireAdmin.tsx        guard de rutas solo para administración
 ├─ features/treatments/       catálogo: servicio, hook, toolbar, tabla, modal
 ├─ features/odontogram/       odontograma SVG, servicio de ítems, presupuesto, dictado por voz y cobro del plan
-├─ features/team/             equipo: servicio, hook, toolbar, tabla y modales
+├─ features/team/             equipo: servicio, hook, toolbar, tabla y modales + directorio (`staff_directory`)
+├─ features/tv/               pantalla de sala: cola derivada, servicio, Realtime, anuncios y componentes
 ├─ components/
 │  ├─ layout/AppLayout.tsx       sidebar fija (lg+) + drawer móvil + header
 │  ├─ layout/ConnectionStatus.tsx indicador PWA en línea / sin conexión
@@ -259,6 +261,7 @@ src/
 | `/tratamientos` | Catálogo de tratamientos (precios en PYG) | Privada |
 | `/odontograma` | Odontograma interactivo y presupuesto dental | Privada (escritura: `dentist` / `admin`) |
 | `/caja` | Caja y finanzas | Privada |
+| `/tv` | Pantalla de sala (modo TV / turnero), sin el layout con menú | Privada |
 | `/equipo` | Equipo y roles | Solo `admin` |
 
 `useAuth()` es la única puerta al estado de sesión:
@@ -644,6 +647,66 @@ anamnesis + consentimiento informado que se completa en la primera consulta.
 
 > La migración `20261104130000_patient_medical_history.sql` reutiliza `public.handle_updated_at()`
 > del esquema inicial, así que debe aplicarse después de `20261028090000_init_ad_clinic_schema.sql`.
+
+### 12. Pantalla de sala (modo TV / turnero)
+
+`/tv` es el televisor de la sala de espera: pantalla completa, tema oscuro con los acentos
+dorados de la marca, reloj en vivo y estado del canal de Realtime. **No** usa `AppLayout` (se
+registra fuera del layout, pero dentro de `<RequireAuth>`): los nombres de los pacientes no son
+públicos, así que la tele se abre con una sesión del personal.
+
+- **Acceso:** el botón **Pantalla de sala** de la agenda (`/citas`) abre `/tv` en una pestaña
+  nueva; `F11` o el botón de la cabecera la ponen en pantalla completa. La pantalla queda
+  abierta y no necesita interacción diaria.
+- **Qué muestra:** tarjeta gigante con el paciente llamado (nombre completo, profesional,
+  consultorio/box y motivo), pulso dorado mientras la llamada está vigente, panel con los
+  próximos en espera (ordenados por horario, con los minutos que llevan esperando), los que ya
+  están en consultorio y los últimos atendidos del día.
+- **Fases derivadas:** la base no tiene estados `waiting` / `calling` / `in_progress`; se derivan
+  de la agenda (`features/tv/tv-types.ts`): `checked_in` sin `called_at` → **en espera**;
+  `checked_in` con `called_at` de los últimos 10 minutos → **llamando** (pulso); `checked_in`
+  con `called_at` más viejo → **en consultorio**; `completed` → **atendido**. El turnero consulta
+  solo el día actual con esos dos estados.
+- **Realtime:** `useWaitingRoom` se suscribe con `supabase.channel('public:appointments')` a
+  `postgres_changes`, con filtro `starts_at=gte.<medianoche local>`, y descarta los eventos que
+  no son del día. Como Realtime manda solo las columnas de la tabla (sin el paciente embebido),
+  cada evento agrupa una reconsulta 250 ms después en lugar de aplicar el payload. Hay refresco
+  de respaldo cada 5 minutos, al volver a la pestaña y al recuperar la red, y rollover automático
+  del día a medianoche. La cabecera marca **En vivo** / **Conectando…** / **Reconectando…** /
+  **Sin conexión**.
+- **Aviso sonoro:** campanilla de dos notas con WebAudio + `SpeechSynthesis` en español
+  («Paciente Ana Gómez, pasar a Box 1, por favor.») cuando aparece una llamada nueva; la firma es
+  `id|called_at`, así «Volver a llamar» vuelve a sonar. El botón de la cabecera silencia o
+  reactiva el audio y la preferencia se guarda en `localStorage`; al activarlo se reproduce una
+  prueba para desbloquear el audio del navegador (los navegadores bloquean el sonido hasta un
+  gesto del usuario). Sin voces instaladas queda solo la campanilla.
+- **Disparador en la agenda:** cada tarjeta de `/citas` en estado programada, confirmada o en
+  sala tiene **Llamar a sala** (altavoz). `callAppointmentToRoom()` deja la cita en `checked_in`
+  (conserva la hora de llegada si ya existía), escribe `called_at` y `called_by`, y la tele
+  reacciona al instante; al volver a llamar el botón dice **Volver a llamar** y la tarjeta
+  muestra «Llamado 10:12». Reabrir, cancelar o marcar inasistencia limpia `called_at`.
+- **Consultorio y profesional:** el formulario de citas tiene «Consultorio / box» (texto libre,
+  ≤ 40 caracteres) y «Profesional» (select del personal activo). El nombre del profesional sale
+  del directorio (`fetchStaffDirectory`), que lee la vista `staff_directory`; así recepción y
+  odontología pueden asignar y ver el profesional sin abrir `profiles` (que sigue siendo solo
+  para administración).
+- **Datos y migración:** todo depende de `20261110100000_waiting_room_display.sql`. Si todavía no
+  se aplicó, `/tv` y la agenda siguen **leyendo** con el select viejo (`APPOINTMENT_SELECT_LEGACY`)
+  y la tele muestra un aviso ámbar sin consultorio ni llamadas en tiempo real; guardar una cita o
+  llamar a sala falla con «Falta una columna en la tabla de citas. Verificá la migración aplicada».
+  Para que lleguen los eventos, `appointments` tiene que estar en la publicación
+  `supabase_realtime` (lo hace la migración).
+- **Privacidad:** el turnero muestra nombres y apellidos completos en una pantalla pública dentro
+  de la clínica. Si se necesita más discreción, se puede abreviar el apellido en
+  `buildWaitingRoomSnapshot` (`features/tv/tv-queue.ts`), que es el único lugar que arma el
+  nombre visible.
+
+Prueba manual: aplicá la migración, abrí `/tv` en la tele y `/citas` en recepción; con la cita del
+día en estado **En sala** (o directamente desde **Llamar a sala**) el nombre debe aparecer en la
+pantalla en menos de un segundo, con campanilla y voz. Al marcarla **Atendida**, la llamada sale
+de la tarjeta y el paciente pasa a «Últimos atendidos». Si el canal se corta, la cabecera pasa a
+**Reconectando…** y la pantalla se sigue refrescando cada 5 minutos.
+
 
 
 

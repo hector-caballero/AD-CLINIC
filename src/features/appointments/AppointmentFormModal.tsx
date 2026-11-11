@@ -23,9 +23,12 @@ import {
   updateAppointment,
 } from './appointments-service'
 import {
+  normalizeRoom,
   type AppointmentFormValues,
   type AppointmentWithPatient,
 } from './appointment-types'
+import { useStaffDirectory } from '../team/staff-directory'
+import { getRoleLabel } from '../team/team-types'
 
 type AppointmentFormModalProps = {
   /** `null` para agendar una cita nueva. */
@@ -56,11 +59,13 @@ function buildInitialValues(
   if (appointment) {
     return {
       patient_id: appointment.patient_id,
+      dentist_id: appointment.dentist_id ?? '',
       date: toDateKey(new Date(appointment.starts_at)),
       start_time: formatAppointmentTime(appointment.starts_at),
       end_time: formatAppointmentTime(appointment.ends_at),
       reason: appointment.reason,
       notes: appointment.notes ?? '',
+      room: appointment.room ?? '',
     }
   }
 
@@ -68,11 +73,13 @@ function buildInitialValues(
 
   return {
     patient_id: '',
+    dentist_id: '',
     date: defaultDate,
     start_time: startTime,
     end_time: addMinutesToTime(startTime, 30),
     reason: '',
     notes: '',
+    room: '',
   }
 }
 
@@ -101,6 +108,8 @@ export function AppointmentFormModal({
   const [submitError, setSubmitError] = useState<string | null>(null)
 
   const mode = appointment ? 'edit' : 'create'
+
+  const { members: staff, isLoading: isStaffLoading, error: staffError } = useStaffDirectory()
 
   const selectedPatient: PatientOption | null = useMemo(() => {
     const fromList = patients.find((patient) => patient.id === values.patient_id)
@@ -242,10 +251,12 @@ export function AppointmentFormModal({
 
     const input = {
       patient_id: values.patient_id,
+      dentist_id: values.dentist_id || null,
       starts_at: start.toISOString(),
       ends_at: end.toISOString(),
       reason,
       notes: values.notes.trim() || null,
+      room: normalizeRoom(values.room),
     }
 
     try {
@@ -421,6 +432,53 @@ export function AppointmentFormModal({
               disabled={isSaving}
               className={INPUT_CLASS}
             />
+          </div>
+        </div>
+
+        <div className="grid gap-3 sm:grid-cols-2">
+          <div>
+            <label htmlFor="appointment-dentist" className={LABEL_CLASS}>
+              Profesional <span className="font-normal text-slate-400">(opcional)</span>
+            </label>
+            <select
+              id="appointment-dentist"
+              value={values.dentist_id}
+              onChange={(event) => setField('dentist_id', event.target.value)}
+              disabled={isSaving || isStaffLoading}
+              className={INPUT_CLASS}
+            >
+              <option value="">Sin asignar</option>
+              {staff.map((member) => (
+                <option key={member.id} value={member.id}>
+                  {member.full_name} · {getRoleLabel(member.role)}
+                </option>
+              ))}
+            </select>
+            {staffError && <p className="mt-1 text-xs text-amber-700">{staffError}</p>}
+            {!isStaffLoading && !staffError && staff.length === 0 && (
+              <p className="mt-1 text-xs text-slate-400">
+                Aplicá la migración de la pantalla de sala para elegir el profesional.
+              </p>
+            )}
+          </div>
+
+          <div>
+            <label htmlFor="appointment-room" className={LABEL_CLASS}>
+              Consultorio / box <span className="font-normal text-slate-400">(opcional)</span>
+            </label>
+            <input
+              id="appointment-room"
+              type="text"
+              maxLength={40}
+              value={values.room}
+              onChange={(event) => setField('room', event.target.value)}
+              placeholder="Ej.: Box 1, Consultorio 2"
+              disabled={isSaving}
+              className={INPUT_CLASS}
+            />
+            <p className="mt-1 text-xs text-slate-400">
+              Es lo que la pantalla de sala muestra debajo del nombre.
+            </p>
           </div>
         </div>
 
