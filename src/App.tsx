@@ -6,6 +6,7 @@ import { RequireAuth } from './features/auth/RequireAuth'
 import AppointmentsPage from './pages/AppointmentsPage'
 import CashPage from './pages/CashPage'
 import DashboardPage from './pages/DashboardPage'
+import InvoicingPage from './pages/InvoicingPage'
 import LoginPage from './pages/LoginPage'
 import NotFoundPage from './pages/NotFoundPage'
 import OdontogramPage from './pages/OdontogramPage'
@@ -42,6 +43,7 @@ export default function App() {
               <Route path="tratamientos" element={<TreatmentsPage />} />
               <Route path="odontograma" element={<OdontogramPage />} />
               <Route path="caja" element={<CashPage />} />
+              <Route path="facturacion" element={<InvoicingPage />} />
               <Route
                 path="equipo"
                 element={

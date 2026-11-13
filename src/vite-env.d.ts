@@ -33,6 +33,16 @@ interface ImportMetaEnv {
    */
   readonly VITE_GEMINI_API_KEY?: string
   readonly VITE_GEMINI_MODEL?: string
+  /**
+   * API pública de Tu RUC (`https://turuc.com.py`) que usan los formularios de
+   * facturación para autocompletar la razón social del RUC.
+   *
+   * Es opcional: si falta se usa `https://turuc.com.py/api`. Conviene definirla
+   * cuando la app se publica por HTTPS y el navegador bloquea la consulta
+   * directa (CORS): apuntala a un proxy propio que reenvíe
+   * `/api/contribuyente?ruc=…` a Tu RUC.
+   */
+  readonly VITE_TURUC_API_URL?: string
 }
 
 interface ImportMeta {

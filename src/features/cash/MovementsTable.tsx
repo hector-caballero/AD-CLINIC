@@ -1,4 +1,4 @@
-import { Wallet } from 'lucide-react'
+import { FileText, Wallet } from 'lucide-react'
 import { formatPatientDocument, formatPYG, formatShortDate, getInitials } from '../../lib/format'
 import { formatMovementDate, formatMovementTime } from './cash-dates'
 import { formatSignedAmount, getMovementTimestamp } from './cash-format'
@@ -15,6 +15,13 @@ import {
 type MovementsTableProps = {
   movements: CashMovement[]
   onOpenAccount: (patientId: string) => void
+  /** Emite la factura legal del cobro (solo pagos confirmados). */
+  onInvoice?: (movement: CashMovement) => void
+}
+
+/** Un cobro facturable es un pago confirmado: el dinero ya entró a la caja. */
+function isInvoiceable(movement: CashMovement): boolean {
+  return movement.type === 'payment' && movement.status === 'paid'
 }
 
 const HEAD_CLASS = 'px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500'
@@ -71,7 +78,7 @@ function MovementAmount({ movement }: { movement: CashMovement }) {
  * Cada fila resume fecha, paciente, concepto, monto, método y estado; el botón
  * de la última columna abre el estado de cuenta del paciente.
  */
-export function MovementsTable({ movements, onOpenAccount }: MovementsTableProps) {
+export function MovementsTable({ movements, onOpenAccount, onInvoice }: MovementsTableProps) {
   return (
     <>
       <div className="hidden overflow-x-auto md:block">
@@ -184,15 +191,28 @@ export function MovementsTable({ movements, onOpenAccount }: MovementsTableProps
                   </td>
 
                   <td className="px-4 py-3 text-right">
-                    <button
-                      type="button"
-                      onClick={() => onOpenAccount(movement.patient_id)}
-                      aria-label={`Ver el estado de cuenta de ${patientName}`}
-                      title="Estado de cuenta"
-                      className="rounded-lg border border-slate-300 bg-white/85 p-1.5 text-slate-500 transition-colors hover:bg-slate-50 hover:text-brand-700"
-                    >
-                      <Wallet className="size-4" aria-hidden="true" />
-                    </button>
+                    <div className="flex items-center justify-end gap-1.5">
+                      {onInvoice && isInvoiceable(movement) && (
+                        <button
+                          type="button"
+                          onClick={() => onInvoice(movement)}
+                          aria-label={`Emitir la factura del cobro de ${patientName}`}
+                          title="Emitir factura"
+                          className="rounded-lg border border-slate-300 bg-white/85 p-1.5 text-slate-500 transition-colors hover:bg-slate-50 hover:text-emerald-700"
+                        >
+                          <FileText className="size-4" aria-hidden="true" />
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => onOpenAccount(movement.patient_id)}
+                        aria-label={`Ver el estado de cuenta de ${patientName}`}
+                        title="Estado de cuenta"
+                        className="rounded-lg border border-slate-300 bg-white/85 p-1.5 text-slate-500 transition-colors hover:bg-slate-50 hover:text-brand-700"
+                      >
+                        <Wallet className="size-4" aria-hidden="true" />
+                      </button>
+                    </div>
                   </td>
                 </tr>
               )
@@ -237,15 +257,27 @@ export function MovementsTable({ movements, onOpenAccount }: MovementsTableProps
                   )}
                 </div>
 
-                <button
-                  type="button"
-                  onClick={() => onOpenAccount(movement.patient_id)}
-                  aria-label={`Ver el estado de cuenta de ${patientName}`}
-                  className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white/85 px-2.5 py-1 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-50"
-                >
-                  <Wallet className="size-3.5" aria-hidden="true" />
-                  Estado de cuenta
-                </button>
+                <div className="flex items-center gap-1.5">
+                  {onInvoice && isInvoiceable(movement) && (
+                    <button
+                      type="button"
+                      onClick={() => onInvoice(movement)}
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white/85 px-2.5 py-1 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-50 hover:text-emerald-700"
+                    >
+                      <FileText className="size-3.5" aria-hidden="true" />
+                      Facturar
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => onOpenAccount(movement.patient_id)}
+                    aria-label={`Ver el estado de cuenta de ${patientName}`}
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white/85 px-2.5 py-1 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-50"
+                  >
+                    <Wallet className="size-3.5" aria-hidden="true" />
+                    Estado de cuenta
+                  </button>
+                </div>
               </div>
             </li>
           )

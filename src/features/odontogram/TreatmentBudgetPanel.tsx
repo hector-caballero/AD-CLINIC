@@ -4,6 +4,7 @@ import {
   Banknote,
   CircleCheck,
   ClipboardList,
+  FileText,
   Loader2,
   Receipt,
   RefreshCw,
@@ -201,6 +202,8 @@ export type TreatmentBudgetPanelProps = {
   onRemove: (item: OdontogramItem) => void
   /** Abre el modal de «Cobrar este plan». */
   onChargePlan: () => void
+  /** Abre la emisión de factura con el importe del plan sin cobrar. */
+  onInvoicePlan: () => void
 }
 
 /**
@@ -220,6 +223,7 @@ export function TreatmentBudgetPanel({
   onChangeStatus,
   onRemove,
   onChargePlan,
+  onInvoicePlan,
 }: TreatmentBudgetPanelProps) {
   const sorted = sortOdontogramItems(items)
   const totals = computeOdontogramTotals(sorted)
@@ -285,14 +289,24 @@ export function TreatmentBudgetPanel({
         <div className="border-b border-slate-100 px-4 py-3 sm:px-5">
           {chargeable.length > 0 ? (
             <>
-              <button
-                type="button"
-                onClick={onChargePlan}
-                className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-brand-500 px-3 py-2.5 text-sm font-semibold text-ink-950 shadow-sm shadow-brand-500/30 ring-1 ring-brand-600/25 transition-colors hover:bg-brand-400"
-              >
-                <Banknote className="size-4" aria-hidden="true" />
-                Cobrar este plan
-              </button>
+              <div className="grid gap-2 sm:grid-cols-2">
+                <button
+                  type="button"
+                  onClick={onChargePlan}
+                  className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-brand-500 px-3 py-2.5 text-sm font-semibold text-ink-950 shadow-sm shadow-brand-500/30 ring-1 ring-brand-600/25 transition-colors hover:bg-brand-400"
+                >
+                  <Banknote className="size-4" aria-hidden="true" />
+                  Cobrar este plan
+                </button>
+                <button
+                  type="button"
+                  onClick={onInvoicePlan}
+                  className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-slate-300 bg-white/85 px-3 py-2.5 text-sm font-medium text-slate-700 shadow-sm transition-colors hover:bg-slate-50"
+                >
+                  <FileText className="size-4" aria-hidden="true" />
+                  Facturar
+                </button>
+              </div>
               <p className="mt-1.5 text-center text-[11px] text-slate-500">
                 {chargeable.length} {chargeable.length === 1 ? 'línea' : 'líneas'} sin cobrar ·{' '}
                 {formatPYG(chargeableTotal)}

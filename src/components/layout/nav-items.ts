@@ -1,6 +1,7 @@
 import {
   CalendarDays,
   ClipboardList,
+  FileText,
   LayoutDashboard,
   ShieldCheck,
   Stethoscope,
@@ -58,6 +59,12 @@ export const navItems: NavItem[] = [
     label: 'Caja',
     description: 'Cobros, pagos y saldos',
     icon: Wallet,
+  },
+  {
+    to: '/facturacion',
+    label: 'Facturación',
+    description: 'Facturas legales y gastos',
+    icon: FileText,
   },
   {
     to: '/equipo',

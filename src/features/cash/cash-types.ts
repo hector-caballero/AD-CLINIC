@@ -57,6 +57,8 @@ export type MovementTreatment = {
   unit_price: number
   total_price: number
   status: TreatmentStatus
+  /** Profesional que realizó el tratamiento: sirve para sugerir el emisor. */
+  dentist_id: string | null
   treatment: TreatmentRef | null
 }
 
@@ -194,7 +196,7 @@ export const CASH_MOVEMENT_SELECT = [
   'created_at',
   'updated_at',
   `patient:patients(${PATIENT_EMBED})`,
-  `patient_treatment:patient_treatments(id, quantity, unit_price, total_price, status, treatment:treatments(${TREATMENT_EMBED}))`,
+  `patient_treatment:patient_treatments(id, quantity, unit_price, total_price, status, dentist_id, treatment:treatments(${TREATMENT_EMBED}))`,
 ].join(', ')
 
 export const BALANCE_SELECT = [

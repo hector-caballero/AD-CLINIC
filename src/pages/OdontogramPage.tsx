@@ -18,6 +18,8 @@ import type { BilledItemLink } from '../features/odontogram/odontogram-service'
 import { DENTITION_OPTIONS } from '../features/odontogram/odontogram-teeth'
 import {
   ITEM_STATUS_META,
+  getChargeableItems,
+  getItemAmount,
   getItemLabel,
   isAbsentTooth,
   type Dentition,
@@ -28,6 +30,7 @@ import {
   type ToothSurface,
 } from '../features/odontogram/odontogram-types'
 import { useOdontogram } from '../features/odontogram/useOdontogram'
+import { InvoiceFormModal, type InvoiceSeed } from '../features/invoicing/InvoiceFormModal'
 import { getInitials, formatPYG } from '../lib/format'
 
 const SECONDARY_BUTTON_CLASS =
@@ -58,6 +61,7 @@ export default function OdontogramPage() {
   const [notice, setNotice] = useState<Notice | null>(null)
   const [busyItemId, setBusyItemId] = useState<string | null>(null)
   const [isChargingPlan, setIsChargingPlan] = useState(false)
+  const [invoiceSeed, setInvoiceSeed] = useState<InvoiceSeed | null>(null)
 
   const {
     patients,
@@ -245,6 +249,12 @@ export default function OdontogramPage() {
 
   const patientName = patient ? getPatientFullName(patient) : ''
   const selectionIsAbsent = selection ? isAbsentTooth(odontogram.items, selection.toothNumber) : false
+
+  /** Importe del plan que todavía no se cobró: es el que se propone al facturar. */
+  const chargeableTotal = useMemo(
+    () => getChargeableItems(odontogram.items).reduce((sum, item) => sum + getItemAmount(item), 0),
+    [odontogram.items],
+  )
 
   return (
     <div className="space-y-5">
@@ -439,6 +449,15 @@ export default function OdontogramPage() {
               onChangeStatus={handleChangeStatus}
               onRemove={handleRemove}
               onChargePlan={() => setIsChargingPlan(true)}
+              onInvoicePlan={() => {
+                if (!patient) return
+
+                setInvoiceSeed({
+                  patientId: patient.id,
+                  patientName,
+                  amount: chargeableTotal > 0 ? chargeableTotal : undefined,
+                })
+              }}
             />
           </div>
 
@@ -485,6 +504,22 @@ export default function OdontogramPage() {
           items={odontogram.items}
           onClose={() => setIsChargingPlan(false)}
           onSubmit={handleChargePlan}
+        />
+      )}
+
+      {invoiceSeed && (
+        <InvoiceFormModal
+          key={invoiceSeed.patientId ?? 'odontogram-invoice'}
+          patients={patients}
+          seed={invoiceSeed}
+          onClose={() => setInvoiceSeed(null)}
+          onIssued={(invoice) => {
+            setInvoiceSeed(null)
+            setNotice({
+              tone: 'success',
+              message: `Factura ${invoice.invoice_number} emitida por ${formatPYG(invoice.total)}.`,
+            })
+          }}
         />
       )}
     </div>

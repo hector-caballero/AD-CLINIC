@@ -9,7 +9,10 @@ import { PatientAccountModal } from '../features/cash/PatientAccountModal'
 import { RegisterMovementModal } from '../features/cash/RegisterMovementModal'
 import { formatMonthLabel } from '../features/cash/cash-dates'
 import { countMovementsByType, filterMovements } from '../features/cash/cash-metrics'
+import { getMovementPatientName } from '../features/cash/cash-types'
+import { InvoiceFormModal, type InvoiceSeed } from '../features/invoicing/InvoiceFormModal'
 import type {
+  CashMovement,
   CashPeriod,
   MovementResult,
   MovementTypeFilter,
@@ -41,6 +44,7 @@ export default function CashPage() {
   const [query, setQuery] = useState('')
   const [registerState, setRegisterState] = useState<{ patientId?: string } | null>(null)
   const [accountPatientId, setAccountPatientId] = useState<string | null>(null)
+  const [invoiceSeed, setInvoiceSeed] = useState<InvoiceSeed | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
 
   const { patients, error: patientsError, reload: reloadPatients } = usePatients()
@@ -83,6 +87,22 @@ export default function CashPage() {
   function openAccount(patientId: string) {
     setNotice(null)
     setAccountPatientId(patientId)
+  }
+
+  /**
+   * Factura legal de un cobro: se precarga el paciente, el importe, el
+   * movimiento de caja y el profesional que atendió (para sugerir el emisor).
+   */
+  function openInvoice(movement: CashMovement) {
+    setNotice(null)
+    setInvoiceSeed({
+      patientId: movement.patient_id,
+      patientName: getMovementPatientName(movement),
+      amount: movement.amount,
+      transactionId: movement.id,
+      dentistId: movement.patient_treatment?.dentist_id ?? null,
+      note: movement.receipt_number ? `Cobro ${movement.receipt_number}` : null,
+    })
   }
 
   function handleSaved(result: MovementResult, patientName: string) {
@@ -278,7 +298,11 @@ export default function CashPage() {
                 </span>
               </div>
 
-              <MovementsTable movements={visibleMovements} onOpenAccount={openAccount} />
+              <MovementsTable
+                movements={visibleMovements}
+                onOpenAccount={openAccount}
+                onInvoice={openInvoice}
+              />
             </>
           )}
         </section>
@@ -317,6 +341,21 @@ export default function CashPage() {
           initialBalance={accountBalance}
           onClose={() => setAccountPatientId(null)}
           onCharge={handleChargeFromAccount}
+        />
+      )}
+
+      {invoiceSeed && (
+        <InvoiceFormModal
+          key={invoiceSeed.transactionId ?? 'cash-invoice'}
+          patients={patients}
+          seed={invoiceSeed}
+          onClose={() => setInvoiceSeed(null)}
+          onIssued={(invoice) => {
+            setInvoiceSeed(null)
+            setNotice(
+              `Factura ${invoice.invoice_number} emitida por ${formatPYG(invoice.total)}.`,
+            )
+          }}
         />
       )}
     </div>
