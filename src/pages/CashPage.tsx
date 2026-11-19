@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { AlertCircle, Loader2, ReceiptText, RefreshCw, SearchX, X } from 'lucide-react'
+import { AlertCircle, FileText, Loader2, ReceiptText, RefreshCw, SearchX, X } from 'lucide-react'
 import { formatPYG } from '../lib/format'
 import { BalancesPanel } from '../features/cash/BalancesPanel'
 import { CashSummaryCards } from '../features/cash/CashSummaryCards'
@@ -8,9 +8,12 @@ import { MovementsTable } from '../features/cash/MovementsTable'
 import { PatientAccountModal } from '../features/cash/PatientAccountModal'
 import { RegisterMovementModal } from '../features/cash/RegisterMovementModal'
 import { formatMonthLabel } from '../features/cash/cash-dates'
+import { getAvailableAmount } from '../features/cash/cash-format'
 import { countMovementsByType, filterMovements } from '../features/cash/cash-metrics'
 import { getMovementPatientName } from '../features/cash/cash-types'
+import { useCashInvoicing } from '../features/cash/useCashInvoicing'
 import { InvoiceFormModal, type InvoiceSeed } from '../features/invoicing/InvoiceFormModal'
+import type { Invoice } from '../features/invoicing/invoicing-types'
 import type {
   CashMovement,
   CashPeriod,
@@ -45,6 +48,7 @@ export default function CashPage() {
   const [registerState, setRegisterState] = useState<{ patientId?: string } | null>(null)
   const [accountPatientId, setAccountPatientId] = useState<string | null>(null)
   const [invoiceSeed, setInvoiceSeed] = useState<InvoiceSeed | null>(null)
+  const [selectedMovementIds, setSelectedMovementIds] = useState<string[]>([])
   const [notice, setNotice] = useState<string | null>(null)
 
   const { patients, error: patientsError, reload: reloadPatients } = usePatients()
@@ -59,6 +63,22 @@ export default function CashPage() {
 
   const [monthLabel] = useState(() => formatMonthLabel(new Date()))
   const counts = useMemo(() => countMovementsByType(movements), [movements])
+
+  const cashInvoicing = useCashInvoicing(movements)
+
+  const selectedMovements = useMemo(
+    () => movements.filter((movement) => selectedMovementIds.includes(movement.id)),
+    [movements, selectedMovementIds],
+  )
+
+  const selectedTotal = useMemo(
+    () =>
+      selectedMovements.reduce(
+        (total, movement) => total + getAvailableAmount(cashInvoicing.invoicing.get(movement.id)),
+        0,
+      ),
+    [selectedMovements, cashInvoicing.invoicing],
+  )
 
   const visibleMovements = useMemo(
     () => filterMovements(movements, { query, type: typeFilter }),
@@ -90,19 +110,84 @@ export default function CashPage() {
   }
 
   /**
-   * Factura legal de un cobro: se precarga el paciente, el importe, el
-   * movimiento de caja y el profesional que atendió (para sugerir el emisor).
+   * Factura legal de un cobro: se precarga el paciente, el importe sin facturar,
+   * el movimiento de caja y el profesional que atendió (para sugerir el emisor).
    */
   function openInvoice(movement: CashMovement) {
+    const available = getAvailableAmount(cashInvoicing.invoicing.get(movement.id))
+
     setNotice(null)
     setInvoiceSeed({
       patientId: movement.patient_id,
       patientName: getMovementPatientName(movement),
-      amount: movement.amount,
-      transactionId: movement.id,
+      amount: available > 0 ? available : movement.amount,
+      transactionId: available > 0 ? null : movement.id,
+      paymentAllocations:
+        available > 0 ? [{ transactionId: movement.id, amount: available }] : undefined,
       dentistId: movement.patient_treatment?.dentist_id ?? null,
       note: movement.receipt_number ? `Cobro ${movement.receipt_number}` : null,
     })
+  }
+
+  /**
+   * Marca / desmarca un cobro para la factura conjunta.
+   * Una factura es de un solo paciente, así que al elegir otro la selección
+   * empieza de nuevo en vez de mezclar titulares.
+   */
+  function toggleSelectedMovement(movement: CashMovement) {
+    setNotice(null)
+    setSelectedMovementIds((current) => {
+      if (current.includes(movement.id)) {
+        return current.filter((id) => id !== movement.id)
+      }
+
+      const anchor = movements.find((item) => item.id === current[0])
+
+      if (anchor && anchor.patient_id !== movement.patient_id) {
+        return [movement.id]
+      }
+
+      return [...current, movement.id]
+    })
+  }
+
+  /**
+   * Factura con todos los cobros marcados: cada uno se imputa por lo que todavía
+   * no está facturado, así el anticipo ya cobrado paga la factura nueva.
+   */
+  function openSelectionInvoice() {
+    const [first] = selectedMovements
+    if (!first) return
+
+    const allocations = selectedMovements
+      .map((movement) => ({
+        transactionId: movement.id,
+        amount: getAvailableAmount(cashInvoicing.invoicing.get(movement.id)),
+      }))
+      .filter((item) => item.amount > 0)
+
+    if (allocations.length === 0) return
+
+    const dentist = selectedMovements.find((movement) => movement.patient_treatment?.dentist_id)
+
+    setNotice(null)
+    setInvoiceSeed({
+      patientId: first.patient_id,
+      patientName: getMovementPatientName(first),
+      amount: allocations.reduce((total, item) => total + item.amount, 0),
+      paymentAllocations: allocations,
+      dentistId: dentist?.patient_treatment?.dentist_id ?? null,
+      note: `Cobros aplicados: ${allocations.length}`,
+    })
+  }
+
+  function handleInvoiceIssued(invoice: Invoice) {
+    setInvoiceSeed(null)
+    setSelectedMovementIds([])
+    setNotice(`Factura ${invoice.invoice_number} emitida por ${formatPYG(invoice.total)}.`)
+
+    reloadMovements()
+    cashInvoicing.reload()
   }
 
   function handleSaved(result: MovementResult, patientName: string) {
@@ -191,7 +276,10 @@ export default function CashPage() {
               rangeLabel={range.label}
               isRefreshing={isMovementsLoading || overview.isLoading}
               onQueryChange={setQuery}
-              onPeriodChange={setPeriod}
+              onPeriodChange={(next) => {
+                setPeriod(next)
+                setSelectedMovementIds([])
+              }}
               onTypeFilterChange={setTypeFilter}
               onRefresh={() => {
                 reloadMovements()
@@ -298,10 +386,59 @@ export default function CashPage() {
                 </span>
               </div>
 
+              {selectedMovements.length > 0 && (
+                <div className="flex flex-wrap items-center justify-between gap-2 border-b border-brand-100 bg-brand-50/60 px-4 py-2.5 text-xs text-slate-600 sm:px-5">
+                  <span>
+                    <span className="font-semibold text-slate-800">
+                      {selectedMovements.length}
+                    </span>{' '}
+                    {selectedMovements.length === 1
+                      ? 'cobro seleccionado'
+                      : 'cobros seleccionados'}{' '}
+                    ·{' '}
+                    <span className="font-semibold text-emerald-700">
+                      {formatPYG(selectedTotal)}
+                    </span>{' '}
+                    sin facturar
+                  </span>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setSelectedMovementIds([])}
+                      className="inline-flex items-center justify-center rounded-lg border border-slate-300 bg-white/85 px-2.5 py-1 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-50"
+                    >
+                      Limpiar
+                    </button>
+                    <button
+                      type="button"
+                      onClick={openSelectionInvoice}
+                      disabled={selectedTotal <= 0}
+                      className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-brand-500 px-2.5 py-1 text-xs font-semibold text-ink-950 shadow-sm shadow-brand-500/30 ring-1 ring-brand-600/25 transition-colors hover:bg-brand-400 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      <FileText className="size-3.5" aria-hidden="true" />
+                      Emitir factura por cobros seleccionados
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {cashInvoicing.error && (
+                <p
+                  role="alert"
+                  className="border-b border-amber-200 bg-amber-50 px-4 py-2 text-xs text-amber-800"
+                >
+                  No se pudo cargar el estado de facturación de los cobros:{' '}
+                  {cashInvoicing.error}
+                </p>
+              )}
+
               <MovementsTable
                 movements={visibleMovements}
                 onOpenAccount={openAccount}
                 onInvoice={openInvoice}
+                invoicing={cashInvoicing.invoicing}
+                selectedIds={selectedMovementIds}
+                onToggleSelect={toggleSelectedMovement}
               />
             </>
           )}
@@ -321,6 +458,14 @@ export default function CashPage() {
         <span className="font-medium text-slate-500">patient_balances</span> (cargos − ajustes −
         pagos confirmados + devoluciones): un cobro inmediato registra el cargo y el pago, mientras
         que un cargo «a cuenta» queda pendiente hasta que se registre un abono.
+      </p>
+
+      <p className="text-xs leading-relaxed text-slate-400">
+        La columna de facturación sale de la vista{' '}
+        <span className="font-medium text-slate-500">transaction_invoicing</span>: un cobro puede
+        imputarse entero o en partes a una o varias facturas, y solo queda como facturado cuando no
+        le resta importe disponible. Marcá varios cobros del mismo paciente para emitir una sola
+        factura con todos ellos.
       </p>
 
       {registerState && (
@@ -350,12 +495,7 @@ export default function CashPage() {
           patients={patients}
           seed={invoiceSeed}
           onClose={() => setInvoiceSeed(null)}
-          onIssued={(invoice) => {
-            setInvoiceSeed(null)
-            setNotice(
-              `Factura ${invoice.invoice_number} emitida por ${formatPYG(invoice.total)}.`,
-            )
-          }}
+          onIssued={handleInvoiceIssued}
         />
       )}
     </div>

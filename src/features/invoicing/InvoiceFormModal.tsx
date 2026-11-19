@@ -2,20 +2,25 @@ import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import {
   AlertCircle,
   AlertTriangle,
+  Banknote,
   Building2,
+  CalendarDays,
   Check,
   Hash,
+  IdCard,
+  Landmark,
   Link2,
   Loader2,
   Lock,
   Receipt,
   RefreshCw,
   ShieldCheck,
+  UserRound,
 } from 'lucide-react'
 import { Modal } from '../../components/ui/Modal'
 import { formatPYG, formatPYGInput, formatShortDate, parsePYGInput } from '../../lib/format'
 import { PatientPicker } from '../patients/PatientPicker'
-import { getPatientFullName, type Patient } from '../patients/patient-types'
+import { getPatientBillingName, type Patient } from '../patients/patient-types'
 import { PAYMENT_METHOD_OPTIONS, type PaymentMethod } from '../cash/cash-types'
 import {
   autoFormatRuc,
@@ -29,20 +34,33 @@ import {
   RUC_FORMAT_HINT,
 } from './invoicing-format'
 import { fetchNextTimbradoSequence, issueInvoice } from './invoicing-service'
+import {
+  MAX_INSTALLMENTS,
+  buildInstallmentPlan,
+  getInstallmentLabel,
+  getPlanTotal,
+  suggestFirstDueDate,
+} from './invoicing-payments'
 import { computeInvoiceBreakdown } from './invoicing-tax'
 import {
+  CUSTOMER_TAX_KIND_OPTIONS,
+  INVOICE_CONDITION_OPTIONS,
   TIMBRADO_MODE_LABELS,
   TIMBRADO_MODE_OPTIONS,
   VAT_RATE_LABELS,
   VAT_RATE_OPTIONS,
   getIssuerName,
   getIssuerTimbrados,
+  getOccasionalCustomer,
   getSelectableTimbrados,
   getTimbradoLabel,
   getTimbradoRangeLabel,
   isAutomaticNumbering,
   suggestIssuer,
+  type CustomerTaxKind,
   type Invoice,
+  type InvoiceCondition,
+  type InvoicePaymentAllocationInput,
   type TaxIssuer,
   type VatRate,
 } from './invoicing-types'
@@ -59,6 +77,22 @@ const HELP_CLASS = 'mt-1 text-xs leading-relaxed text-slate-400'
 const SECONDARY_BUTTON_CLASS =
   'inline-flex items-center justify-center rounded-xl border border-slate-300 bg-white/85 px-4 py-2.5 text-sm font-medium text-slate-700 shadow-sm transition-colors hover:bg-slate-50 disabled:opacity-50'
 
+/** Íconos del selector de condición fiscal (uno por modo). */
+const CUSTOMER_TAX_KIND_ICONS = {
+  contribuyente: Landmark,
+  no_contribuyente: IdCard,
+  ocasional: UserRound,
+} satisfies Record<CustomerTaxKind, typeof Landmark>
+
+/** Cobro que se registra en caja en el mismo paso que la emisión. */
+type CollectMode = 'none' | 'full' | 'down'
+
+const COLLECT_MODE_OPTIONS: { value: CollectMode; label: string; description: string }[] = [
+  { value: 'none', label: 'No cobrar', description: 'La factura queda con saldo a cobrar.' },
+  { value: 'full', label: 'Cobrar todo', description: 'Registra el cobro completo en caja.' },
+  { value: 'down', label: 'Anticipo', description: 'Abono parcial; el resto queda a cuenta.' },
+]
+
 /** Datos del cobro que originan la factura (caja, odontograma o manual). */
 export type InvoiceSeed = {
   patientId?: string | null
@@ -68,6 +102,12 @@ export type InvoiceSeed = {
   /** Profesional que atendió: se usa para sugerir el emisor. */
   dentistId?: string | null
   transactionId?: string | null
+  /**
+   * Cobros de caja que se aplican a la factura (anticipos o cobros ya
+   * registrados). Si vienen, el total ya está cobrado y no se registra un cobro
+   * nuevo: la factura nace con su saldo real.
+   */
+  paymentAllocations?: InvoicePaymentAllocationInput[]
   note?: string | null
 }
 
@@ -119,18 +159,24 @@ export function InvoiceFormModal({
 
   const [patientId, setPatientId] = useState(seed?.patientId ?? '')
   const [customerName, setCustomerName] = useState(() =>
-    seedPatient ? getPatientFullName(seedPatient) : (seed?.patientName ?? ''),
+    seedPatient ? getPatientBillingName(seedPatient) : (seed?.patientName ?? ''),
   )
 
   const seedIsRuc = seedPatient?.document_type === 'RUC'
+  /** Condición fiscal del receptor; se deduce de la ficha si la factura viene de un cobro. */
+  const [customerKind, setCustomerKind] = useState<CustomerTaxKind>(
+    seedIsRuc ? 'contribuyente' : 'no_contribuyente',
+  )
   const [customerRuc, setCustomerRuc] = useState(
     seedIsRuc ? autoFormatRuc(seedPatient?.document_number ?? '') : '',
   )
   const [customerDocument, setCustomerDocument] = useState(
-    seedIsRuc ? '' : (seedPatient?.document_number ?? ''),
+    seedIsRuc ? '' : (seedPatient?.document_number ?? '').replace(/\D+/g, '').slice(0, 8),
   )
   const [customerEmail, setCustomerEmail] = useState(seedPatient?.email ?? '')
   const [customerAddress, setCustomerAddress] = useState(seedPatient?.address ?? '')
+  /** RUC genérico y nombre del consumidor final (configurables). */
+  const occasionalCustomer = getOccasionalCustomer(settings)
 
   const [vatRate, setVatRate] = useState<VatRate>('iva_10')
   const [amountInput, setAmountInput] = useState(() =>
@@ -138,6 +184,23 @@ export function InvoiceFormModal({
   )
   const [method, setMethod] = useState<PaymentMethod | ''>('cash')
   const [notes, setNotes] = useState(seed?.note ?? '')
+
+  /** Cobros de caja que ya pagan esta factura (anticipos, cobros del día). */
+  const seedAllocations = useMemo(
+    () => (seed?.paymentAllocations ?? []).filter((item) => item.amount > 0),
+    [seed?.paymentAllocations],
+  )
+  const seededTotal = useMemo(
+    () => seedAllocations.reduce((sum, item) => sum + Math.round(item.amount), 0),
+    [seedAllocations],
+  )
+
+  const [condition, setCondition] = useState<InvoiceCondition>('contado')
+  const [installmentCountInput, setInstallmentCountInput] = useState('3')
+  const [firstDueDate, setFirstDueDate] = useState(() => suggestFirstDueDate('contado'))
+  /** Cobro que se registra en caja al emitir (si no hay cobros ya aplicados). */
+  const [collectMode, setCollectMode] = useState<CollectMode>('none')
+  const [downPaymentInput, setDownPaymentInput] = useState('')
 
   const [isSaving, setIsSaving] = useState(false)
   const [submitError, setSubmitError] = useState<string | null>(null)
@@ -209,6 +272,26 @@ export function InvoiceFormModal({
     [amount, vatRate],
   )
 
+  const installmentCount = Math.min(
+    Math.max(Number(installmentCountInput) || 1, 1),
+    MAX_INSTALLMENTS,
+  )
+
+  /** Plan que se guarda con la factura; vacío al contado sin cuotas. */
+  const installmentPlan = useMemo(
+    () =>
+      condition === 'credito'
+        ? buildInstallmentPlan(amount, installmentCount, firstDueDate)
+        : [],
+    [amount, condition, firstDueDate, installmentCount],
+  )
+
+  const downPayment = parsePYGInput(downPaymentInput)
+  const collectAmount =
+    collectMode === 'full' ? amount : collectMode === 'down' ? downPayment : 0
+  /** Lo que se cobra en este paso: cobros ya aplicados + cobro nuevo. */
+  const collectedTotal = seededTotal + collectAmount
+
   const automaticNumber = timbrado ? isAutomaticNumbering(timbrado.mode) : false
 
   const cdcPreview = useMemo(() => {
@@ -238,16 +321,40 @@ export function InvoiceFormModal({
     Boolean(issuer) && !isLoading && !error && selectableTimbrados.length === 0
 
   function selectPatient(patient: Patient) {
+    const isRuc = patient.document_type === 'RUC'
+
     setPatientId(patient.id)
-    setCustomerName(getPatientFullName(patient))
+    setCustomerKind(isRuc ? 'contribuyente' : 'no_contribuyente')
+    setCustomerName(getPatientBillingName(patient))
     setCustomerEmail(patient.email ?? '')
     setCustomerAddress(patient.address ?? '')
-    setCustomerRuc(
-      patient.document_type === 'RUC' ? autoFormatRuc(patient.document_number ?? '') : '',
-    )
+    setCustomerRuc(isRuc ? autoFormatRuc(patient.document_number ?? '') : '')
     setCustomerDocument(
-      patient.document_type === 'RUC' ? '' : (patient.document_number ?? ''),
+      isRuc ? '' : (patient.document_number ?? '').replace(/\D+/g, '').slice(0, 8),
     )
+  }
+
+  /**
+   * Cambia la condición fiscal del receptor.
+   *
+   * El modo ocasional es de un clic: al enviar se usan el nombre y el RUC
+   * genéricos de la configuración (`occasionalCustomer`), sin pisar lo que la
+   * persona haya escrito para los otros modos.
+   */
+  function changeCustomerKind(kind: CustomerTaxKind) {
+    if (kind === customerKind) return
+
+    setCustomerKind(kind)
+    setSubmitError(null)
+  }
+
+  /** Cambiar de contado a crédito mueve el primer vencimiento a un mes. */
+  function changeCondition(next: InvoiceCondition) {
+    if (next === condition) return
+
+    setCondition(next)
+    setFirstDueDate(suggestFirstDueDate(next))
+    setSubmitError(null)
   }
 
   function changeIssuer(nextIssuerId: string) {
@@ -296,10 +403,63 @@ export function InvoiceFormModal({
     }
 
     const formattedRuc = autoFormatRuc(customerRuc)
+    const formattedDocument = customerDocument.replace(/\D+/g, '').slice(0, 8)
+    const customerLabel =
+      customerKind === 'ocasional' ? occasionalCustomer.name : customerName.trim()
+    const customerRucValue =
+      customerKind === 'ocasional'
+        ? occasionalCustomer.ruc
+        : customerKind === 'contribuyente'
+          ? formattedRuc
+          : null
+    const customerDocumentValue =
+      customerKind === 'no_contribuyente' ? formattedDocument : null
 
-    if (formattedRuc && !isValidRuc(formattedRuc)) {
-      setSubmitError(`Revisá el RUC del cliente: ${RUC_FORMAT_HINT}.`)
+    if (!customerLabel) {
+      setSubmitError('Ingresá el nombre o la razón social del cliente.')
       return
+    }
+
+    if (customerKind === 'contribuyente') {
+      if (!formattedRuc) {
+        setSubmitError('Ingresá el RUC del contribuyente o cambiá la condición fiscal del cliente.')
+        return
+      }
+      if (!isValidRuc(formattedRuc)) {
+        setSubmitError(`Revisá el RUC del cliente: ${RUC_FORMAT_HINT}.`)
+        return
+      }
+    }
+
+    if (customerKind === 'no_contribuyente' && !/^\d{5,8}$/.test(formattedDocument)) {
+      setSubmitError('Ingresá la C.I. del cliente (5 a 8 dígitos, sin dígito verificador).')
+      return
+    }
+
+    if (seededTotal > 0 && amount < seededTotal) {
+      setSubmitError(
+        `El importe no puede ser menor a los cobros aplicados (${formatPYG(seededTotal)}).`,
+      )
+      return
+    }
+
+    if (collectMode !== 'none') {
+      if (!patientId) {
+        setSubmitError(
+          'Elegí el paciente en la ficha del cliente para registrar el cobro en caja.',
+        )
+        return
+      }
+      if (!method) {
+        setSubmitError('Elegí la forma de pago del cobro en caja.')
+        return
+      }
+      if (collectAmount <= 0 || collectAmount > amount - seededTotal) {
+        setSubmitError(
+          'El importe del cobro debe ser mayor a cero y no superar el saldo de la factura.',
+        )
+        return
+      }
     }
 
     setIsSaving(true)
@@ -310,9 +470,9 @@ export function InvoiceFormModal({
         timbradoId: timbrado.id,
         sequenceNumber,
         customer: {
-          name: customerName,
-          ruc: formattedRuc,
-          document: customerDocument,
+          name: customerLabel,
+          ruc: customerRucValue,
+          document: customerDocumentValue,
           email: customerEmail,
           address: customerAddress,
         },
@@ -323,6 +483,11 @@ export function InvoiceFormModal({
         paymentMethod: method || null,
         cdc: timbrado.mode === 'electronic' ? cdcPreview : null,
         notes,
+        condition,
+        installments: installmentPlan,
+        paymentAllocations: seedAllocations,
+        cashPayment:
+          collectMode === 'none' ? null : { amount: collectAmount, method: method || null },
       })
 
       onIssued(invoice)
@@ -539,6 +704,42 @@ export function InvoiceFormModal({
           <section className="space-y-3">
             <h3 className="text-sm font-semibold text-slate-900">Cliente</h3>
 
+            <div
+              role="radiogroup"
+              aria-label="Condición fiscal del cliente"
+              className="grid gap-2 sm:grid-cols-3"
+            >
+              {CUSTOMER_TAX_KIND_OPTIONS.map((option) => {
+                const Icon = CUSTOMER_TAX_KIND_ICONS[option.value]
+                const isActive = customerKind === option.value
+
+                return (
+                  <button
+                    key={option.value}
+                    type="button"
+                    role="radio"
+                    aria-checked={isActive}
+                    onClick={() => changeCustomerKind(option.value)}
+                    disabled={isSaving}
+                    title={option.description}
+                    className={`flex items-start gap-2 rounded-xl border px-3 py-2.5 text-left transition-colors disabled:opacity-60 ${
+                      isActive
+                        ? 'border-brand-500 bg-brand-50 text-brand-900 ring-1 ring-brand-200'
+                        : 'border-slate-300 bg-white/85 text-slate-600 hover:bg-slate-50'
+                    }`}
+                  >
+                    <Icon className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
+                    <span className="min-w-0">
+                      <span className="block text-sm font-medium">{option.label}</span>
+                      <span className="mt-0.5 block text-[11px] font-normal leading-snug text-slate-500">
+                        {option.description}
+                      </span>
+                    </span>
+                  </button>
+                )
+              })}
+            </div>
+
             <PatientPicker
               patients={patients}
               onSelect={selectPatient}
@@ -548,61 +749,82 @@ export function InvoiceFormModal({
               emptyListHint="Todavía no hay fichas: completá los datos del cliente a mano."
             />
 
+            {customerKind === 'ocasional' ? (
+              <div className="rounded-xl bg-slate-50 px-3 py-2.5 ring-1 ring-slate-200">
+                <p className="text-sm font-medium text-slate-900">{occasionalCustomer.name}</p>
+                <p className="mt-0.5 font-mono text-xs text-slate-600">
+                  RUC {occasionalCustomer.ruc}
+                </p>
+                <p className="mt-1 text-xs leading-relaxed text-slate-500">
+                  Consumidor final con el RUC genérico de la DNIT. Se cambia en Facturación →
+                  Configuración.
+                </p>
+              </div>
+            ) : (
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="sm:col-span-2">
+                  <label htmlFor="invoice-customer-name" className={LABEL_CLASS}>
+                    {customerKind === 'contribuyente' ? 'Razón social' : 'Nombre completo'}
+                  </label>
+                  <input
+                    id="invoice-customer-name"
+                    type="text"
+                    value={customerName}
+                    onChange={(event) => setCustomerName(event.target.value)}
+                    disabled={isSaving}
+                    maxLength={160}
+                    required
+                    placeholder={
+                      customerKind === 'contribuyente'
+                        ? 'Empresa o contribuyente'
+                        : 'Nombre y apellido'
+                    }
+                    className={INPUT_CLASS}
+                  />
+                </div>
+
+                {customerKind === 'contribuyente' ? (
+                  <div className="sm:col-span-2">
+                    <RucLookupField
+                      id="invoice-customer-ruc"
+                      label="RUC"
+                      value={customerRuc}
+                      onChange={setCustomerRuc}
+                      onResolved={(found) => {
+                        if (!customerName.trim()) setCustomerName(found.name)
+                      }}
+                      disabled={isSaving}
+                      placeholder="3870633-4"
+                      helpText="La lupa consulta la DNIT y completa la razón social."
+                    />
+                  </div>
+                ) : (
+                  <div className="sm:col-span-2">
+                    <label htmlFor="invoice-customer-document" className={LABEL_CLASS}>
+                      Cédula de Identidad (C.I.)
+                    </label>
+                    <input
+                      id="invoice-customer-document"
+                      type="text"
+                      inputMode="numeric"
+                      value={customerDocument}
+                      onChange={(event) =>
+                        setCustomerDocument(
+                          event.target.value.replace(/\D+/g, '').slice(0, 8),
+                        )
+                      }
+                      disabled={isSaving}
+                      maxLength={8}
+                      placeholder="4512789"
+                      className={`${INPUT_CLASS} font-mono`}
+                    />
+                    <p className={HELP_CLASS}>Solo números, sin puntos ni dígito verificador.</p>
+                  </div>
+                )}
+              </div>
+            )}
+
             <div className="grid gap-3 sm:grid-cols-2">
-              <div className="sm:col-span-2">
-                <label htmlFor="invoice-customer-name" className={LABEL_CLASS}>
-                  Nombre o razón social
-                </label>
-                <input
-                  id="invoice-customer-name"
-                  type="text"
-                  value={customerName}
-                  onChange={(event) => setCustomerName(event.target.value)}
-                  disabled={isSaving}
-                  maxLength={160}
-                  required
-                  placeholder="Cliente / empresa"
-                  className={INPUT_CLASS}
-                />
-              </div>
-
-              <div>
-                <RucLookupField
-                  id="invoice-customer-ruc"
-                  label={
-                    <>
-                      RUC <span className="font-normal text-slate-400">(opcional)</span>
-                    </>
-                  }
-                  value={customerRuc}
-                  onChange={setCustomerRuc}
-                  onResolved={(found) => {
-                    if (!customerName.trim()) setCustomerName(found.name)
-                  }}
-                  disabled={isSaving}
-                  placeholder="80012345-6"
-                />
-              </div>
-
-              <div>
-                <label htmlFor="invoice-customer-document" className={LABEL_CLASS}>
-                  C.I. <span className="font-normal text-slate-400">(opcional)</span>
-                </label>
-                <input
-                  id="invoice-customer-document"
-                  type="text"
-                  value={customerDocument}
-                  onChange={(event) =>
-                    setCustomerDocument(
-                      event.target.value.replace(/[^0-9A-Za-z]/g, '').slice(0, 20),
-                    )
-                  }
-                  disabled={isSaving}
-                  placeholder="1234567"
-                  className={`${INPUT_CLASS} font-mono`}
-                />
-              </div>
-
               <div>
                 <label htmlFor="invoice-customer-email" className={LABEL_CLASS}>
                   Email <span className="font-normal text-slate-400">(opcional)</span>
@@ -637,8 +859,10 @@ export function InvoiceFormModal({
             </div>
 
             <p className={HELP_CLASS}>
-              Con RUC la factura se emite a nombre de la empresa; sin RUC queda como consumidor
-              final. Elegir una ficha del buscador copia sus datos fiscales.
+              Contribuyente: la factura se emite con RUC (0000000-0) y la lupa valida el número en
+              la DNIT. No contribuyente: nombre completo y C.I. sin dígito verificador. Cliente
+              ocasional: consumidor final con el RUC genérico configurado. Elegir una ficha del
+              buscador copia sus datos fiscales.
             </p>
           </section>
 
@@ -746,7 +970,222 @@ export function InvoiceFormModal({
           </section>
 
           <section className="space-y-3">
+            <h3 className="text-sm font-semibold text-slate-900">Condición de pago</h3>
+
+            <div
+              role="radiogroup"
+              aria-label="Condición de pago"
+              className="grid gap-2 sm:grid-cols-2"
+            >
+              {INVOICE_CONDITION_OPTIONS.map((option) => {
+                const isActive = condition === option.value
+
+                return (
+                  <button
+                    key={option.value}
+                    type="button"
+                    role="radio"
+                    aria-checked={isActive}
+                    onClick={() => changeCondition(option.value)}
+                    disabled={isSaving}
+                    className={`rounded-xl border px-3 py-2.5 text-left transition-colors disabled:opacity-60 ${
+                      isActive
+                        ? 'border-brand-500 bg-brand-50 text-brand-900 ring-1 ring-brand-200'
+                        : 'border-slate-300 bg-white/85 text-slate-600 hover:bg-slate-50'
+                    }`}
+                  >
+                    <span className="block text-sm font-medium">{option.label}</span>
+                    <span className="mt-0.5 block text-[11px] font-normal leading-snug text-slate-500">
+                      {option.description}
+                    </span>
+                  </button>
+                )
+              })}
+            </div>
+
+            {condition === 'credito' && (
+              <div className="space-y-3 rounded-xl bg-slate-50 px-3 py-3 ring-1 ring-slate-200">
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div>
+                    <label htmlFor="invoice-installments" className={LABEL_CLASS}>
+                      Cantidad de cuotas
+                    </label>
+                    <input
+                      id="invoice-installments"
+                      type="text"
+                      inputMode="numeric"
+                      autoComplete="off"
+                      value={installmentCountInput}
+                      onChange={(event) =>
+                        setInstallmentCountInput(
+                          event.target.value.replace(/\D+/g, '').slice(0, 2),
+                        )
+                      }
+                      disabled={isSaving}
+                      placeholder="3"
+                      className={`${INPUT_CLASS} font-mono tabular-nums`}
+                    />
+                  </div>
+
+                  <div>
+                    <label htmlFor="invoice-first-due" className={LABEL_CLASS}>
+                      Primer vencimiento
+                    </label>
+                    <div className="relative">
+                      <CalendarDays
+                        className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-400"
+                        aria-hidden="true"
+                      />
+                      <input
+                        id="invoice-first-due"
+                        type="date"
+                        value={firstDueDate}
+                        onChange={(event) => setFirstDueDate(event.target.value)}
+                        disabled={isSaving}
+                        className={`${INPUT_CLASS} pl-9 font-mono`}
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {installmentPlan.length > 0 ? (
+                  <ul className="space-y-1">
+                    {installmentPlan.map((installment) => (
+                      <li
+                        key={installment.number}
+                        className="flex items-center justify-between gap-2 rounded-lg bg-white/85 px-2.5 py-1.5 text-xs ring-1 ring-slate-200"
+                      >
+                        <span className="truncate text-slate-600">
+                          {getInstallmentLabel(installment, installmentPlan.length)}
+                        </span>
+                        <span className="shrink-0 font-mono tabular-nums text-slate-900">
+                          {formatPYG(installment.amount)}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className={HELP_CLASS}>
+                    Ingresá el importe total para armar el plan de cuotas.
+                  </p>
+                )}
+
+                <p className={HELP_CLASS}>
+                  {installmentPlan.length > 1
+                    ? `${installmentPlan.length} cuotas de ${formatPYG(installmentPlan[0].amount)} en adelante, una por mes desde el primer vencimiento. El plan suma ${formatPYG(getPlanTotal(installmentPlan))}.`
+                    : 'El saldo se cobra en un solo vencimiento a un mes. Cada cuota queda disponible para registrar su cobro desde la tabla de facturas.'}
+                </p>
+              </div>
+            )}
+          </section>
+
+          <section className="space-y-3">
             <h3 className="text-sm font-semibold text-slate-900">Cobro y observaciones</h3>
+
+            {seedAllocations.length > 0 ? (
+              <div className="rounded-xl bg-indigo-50 px-3 py-2.5 text-xs text-indigo-900 ring-1 ring-indigo-200">
+                <p className="flex items-start gap-1.5 font-semibold">
+                  <Link2 className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
+                  Se aplican {seedAllocations.length} cobro(s) de caja por{' '}
+                  {formatPYG(seededTotal)}
+                </p>
+                <p className="mt-1 leading-relaxed text-indigo-700">
+                  El importe no puede ser menor a lo cobrado. Si es mayor, el saldo de{' '}
+                  {formatPYG(Math.max(amount - seededTotal, 0))} queda como cuenta pendiente del
+                  paciente.
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                <span className={LABEL_CLASS}>Cobro en caja</span>
+                <div
+                  role="radiogroup"
+                  aria-label="Cobro en caja al emitir"
+                  className="grid gap-2 sm:grid-cols-3"
+                >
+                  {COLLECT_MODE_OPTIONS.map((option) => {
+                    const isActive = collectMode === option.value
+
+                    return (
+                      <button
+                        key={option.value}
+                        type="button"
+                        role="radio"
+                        aria-checked={isActive}
+                        onClick={() => {
+                          setCollectMode(option.value)
+                          setSubmitError(null)
+                        }}
+                        disabled={isSaving}
+                        className={`rounded-xl border px-3 py-2 text-left transition-colors disabled:opacity-60 ${
+                          isActive
+                            ? 'border-brand-500 bg-brand-50 text-brand-900 ring-1 ring-brand-200'
+                            : 'border-slate-300 bg-white/85 text-slate-600 hover:bg-slate-50'
+                        }`}
+                      >
+                        <span className="block text-sm font-medium">{option.label}</span>
+                        <span className="mt-0.5 block text-[11px] font-normal leading-snug text-slate-500">
+                          {option.description}
+                        </span>
+                      </button>
+                    )
+                  })}
+                </div>
+
+                {collectMode === 'down' && (
+                  <div>
+                    <label htmlFor="invoice-down-payment" className={LABEL_CLASS}>
+                      Importe del anticipo
+                    </label>
+                    <div className="relative">
+                      <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-slate-400">
+                        ₲
+                      </span>
+                      <input
+                        id="invoice-down-payment"
+                        type="text"
+                        inputMode="numeric"
+                        autoComplete="off"
+                        value={downPaymentInput}
+                        onChange={(event) =>
+                          setDownPaymentInput(formatPYGInput(event.target.value))
+                        }
+                        disabled={isSaving}
+                        placeholder="0"
+                        className={`${INPUT_CLASS} pl-8 text-right font-mono tabular-nums`}
+                      />
+                    </div>
+                    <p className={HELP_CLASS}>
+                      Saldo a financiar: {formatPYG(Math.max(amount - downPayment, 0))}. El anticipo
+                      se descuenta de la primera cuota impaga.
+                    </p>
+                  </div>
+                )}
+
+                {collectMode !== 'none' && !patientId && (
+                  <p className="flex items-start gap-2 rounded-xl bg-amber-50 px-3 py-2.5 text-xs text-amber-900 ring-1 ring-amber-200">
+                    <AlertTriangle className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
+                    Elegí el paciente en la ficha del cliente: el cobro se registra en su cuenta de
+                    caja.
+                  </p>
+                )}
+
+                {collectMode !== 'none' && patientId && (
+                  <p className="flex items-start gap-2 rounded-xl bg-emerald-50 px-3 py-2.5 text-xs text-emerald-800 ring-1 ring-emerald-200">
+                    <Banknote className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
+                    Se registra un cobro de {formatPYG(collectAmount)} con la forma de pago elegida y
+                    queda aplicado a esta factura.
+                  </p>
+                )}
+
+                {collectedTotal > 0 && (
+                  <p className={HELP_CLASS}>
+                    Cobrado con esta emisión: {formatPYG(Math.min(collectedTotal, amount))} ·
+                    Saldo: {formatPYG(Math.max(amount - collectedTotal, 0))}
+                  </p>
+                )}
+              </div>
+            )}
 
             <div>
               <label htmlFor="invoice-method" className={LABEL_CLASS}>

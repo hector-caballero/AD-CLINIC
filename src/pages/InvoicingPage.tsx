@@ -1,6 +1,8 @@
 import { useMemo, useState } from 'react'
 import {
   AlertCircle,
+  Download,
+  FileSpreadsheet,
   FileText,
   Loader2,
   Plus,
@@ -15,10 +17,20 @@ import { CancelInvoiceModal } from '../features/invoicing/CancelInvoiceModal'
 import { ExpenseInvoiceFormModal } from '../features/invoicing/ExpenseInvoiceFormModal'
 import { ExpensesTable } from '../features/invoicing/ExpensesTable'
 import { InvoiceFormModal, type InvoiceSeed } from '../features/invoicing/InvoiceFormModal'
+import { InvoicePaymentModal } from '../features/invoicing/InvoicePaymentModal'
 import { InvoicingSettings } from '../features/invoicing/InvoicingSettings'
 import { InvoicesTable } from '../features/invoicing/InvoicesTable'
 import { deleteExpenseInvoice } from '../features/invoicing/invoicing-service'
-import type { ExpenseInvoice, Invoice } from '../features/invoicing/invoicing-types'
+import {
+  getInvoiceBalance,
+  getOccasionalCustomer,
+  type ExpenseInvoice,
+  type Invoice,
+} from '../features/invoicing/invoicing-types'
+import {
+  downloadSalesLedgerCsv,
+  downloadSalesLedgerExcel,
+} from '../features/invoicing/sales-ledger-export'
 import { useInvoiceLedger } from '../features/invoicing/useInvoiceLedger'
 import { useInvoicing } from '../features/invoicing/useInvoicing'
 import { usePatients } from '../features/patients/usePatients'
@@ -62,10 +74,17 @@ export default function InvoicingPage() {
   const [issueSeed, setIssueSeed] = useState<InvoiceSeed | null>(null)
   const [expenseModal, setExpenseModal] = useState<{ expense: ExpenseInvoice | null } | null>(null)
   const [cancelTarget, setCancelTarget] = useState<Invoice | null>(null)
+  const [paymentTarget, setPaymentTarget] = useState<Invoice | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<ExpenseInvoice | null>(null)
   const [isDeleting, setIsDeleting] = useState(false)
   const [deleteError, setDeleteError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
+
+  /** RUC genérico del consumidor final (Configuración → Cliente ocasional). */
+  const occasionalRuc = useMemo(
+    () => getOccasionalCustomer(invoicing.settings).ruc,
+    [invoicing.settings],
+  )
 
   const visibleInvoices = useMemo(() => {
     const term = invoiceQuery.trim().toLowerCase()
@@ -118,6 +137,15 @@ export default function InvoicingPage() {
     [ledger.expenses],
   )
 
+  /** Saldo pendiente de cobro de las facturas vigentes. */
+  const pendingTotal = useMemo(
+    () =>
+      ledger.invoices
+        .filter((invoice) => invoice.status === 'issued')
+        .reduce((total, invoice) => total + getInvoiceBalance(invoice), 0),
+    [ledger.invoices],
+  )
+
   function handleIssued(invoice: Invoice) {
     ledger.addInvoice(invoice)
     setIssueSeed(null)
@@ -129,6 +157,16 @@ export default function InvoicingPage() {
     ledger.replaceInvoice(invoice)
     setCancelTarget(null)
     setNotice(`Factura ${invoice.invoice_number} anulada.`)
+  }
+
+  function handlePaymentRegistered(invoice: Invoice) {
+    ledger.replaceInvoice(invoice)
+    setPaymentTarget(null)
+    setNotice(
+      `Cobro registrado en la factura ${invoice.invoice_number}. Saldo ${formatPYG(
+        getInvoiceBalance(invoice),
+      )}.`,
+    )
   }
 
   function handleExpenseSaved(expense: ExpenseInvoice) {
@@ -279,6 +317,34 @@ export default function InvoicingPage() {
                   {formatPYG(issuedTotal)}
                 </span>
               </p>
+              {pendingTotal > 0 && (
+                <p className="text-xs text-slate-500">
+                  Por cobrar:{' '}
+                  <span className="font-semibold tabular-nums text-amber-700">
+                    {formatPYG(pendingTotal)}
+                  </span>
+                </p>
+              )}
+              <button
+                type="button"
+                onClick={() => downloadSalesLedgerCsv(visibleInvoices, { occasionalRuc })}
+                disabled={visibleInvoices.length === 0}
+                title="Libro de ventas para el contador (CSV con separador ; para Excel)"
+                className={SECONDARY_BUTTON_CLASS}
+              >
+                <Download className="size-4" aria-hidden="true" />
+                Exportar libro (CSV)
+              </button>
+              <button
+                type="button"
+                onClick={() => downloadSalesLedgerExcel(visibleInvoices, { occasionalRuc })}
+                disabled={visibleInvoices.length === 0}
+                title="Libro de ventas en Excel con importes numéricos"
+                className={SECONDARY_BUTTON_CLASS}
+              >
+                <FileSpreadsheet className="size-4" aria-hidden="true" />
+                Exportar libro (Excel)
+              </button>
               <button
                 type="button"
                 onClick={ledger.reload}
@@ -365,7 +431,12 @@ export default function InvoicingPage() {
                 </span>
                 <span>Las anuladas se conservan con su motivo</span>
               </div>
-              <InvoicesTable invoices={visibleInvoices} onCancel={setCancelTarget} />
+              <InvoicesTable
+                invoices={visibleInvoices}
+                occasionalRuc={occasionalRuc}
+                onCancel={setCancelTarget}
+                onRegisterPayment={setPaymentTarget}
+              />
             </>
           )}
         </section>
@@ -503,6 +574,8 @@ export default function InvoicingPage() {
         Los importes están en guaraníes con IVA incluido. El número de factura lo asigna la base al
         emitir, dentro del timbrado y sin repetir correlativos; el IVA se despeja con los divisores
         de la SET (10 % ÷ 11, 5 % ÷ 21). Una factura emitida no se borra: se anula con su motivo.
+        El libro de ventas se exporta en CSV o Excel con las columnas que pide el contador (fecha,
+        timbrado, número, RUC/C.I., gravadas, IVA y total).
       </p>
 
       {issueSeed && (
@@ -531,6 +604,15 @@ export default function InvoicingPage() {
           invoice={cancelTarget}
           onClose={() => setCancelTarget(null)}
           onCancelled={handleCancelled}
+        />
+      )}
+
+      {paymentTarget && (
+        <InvoicePaymentModal
+          key={paymentTarget.id}
+          invoice={paymentTarget}
+          onClose={() => setPaymentTarget(null)}
+          onRegistered={handlePaymentRegistered}
         />
       )}
 

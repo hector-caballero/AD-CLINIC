@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom'
 import { Search } from 'lucide-react'
 import { filterPatients } from './filter-patients'
 import { patientContactLabel } from './patient-contact'
-import type { Patient } from './patient-types'
+import { getPatientBillingName, type Patient } from './patient-types'
 
 export type PatientPickerProps = {
   patients: Patient[]
@@ -107,7 +107,7 @@ export function PatientPicker({
               >
                 <span className="flex w-full items-center justify-between gap-2">
                   <span className="truncate text-sm font-medium text-slate-900">
-                    {patient.first_name} {patient.last_name}
+                    {getPatientBillingName(patient)}
                   </span>
                   {patient.status !== 'active' && (
                     <span className="shrink-0 rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-slate-500">

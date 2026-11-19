@@ -92,109 +92,26 @@ export function formatGroupInput(value: string): string {
   return onlyDigits(value).slice(0, 3)
 }
 
-/** Base del RUC: las personas físicas usan 6–7 dígitos y las empresas 8. */
-export const RUC_BASE_MIN = 5
-export const RUC_BASE_MAX = 8
-
-/** Máximo de dígitos del campo RUC (base + dígito verificador). */
-export const RUC_INPUT_MAX_DIGITS = RUC_BASE_MAX + 1
-
 /**
- * RUC completo tal como lo exige la DNIT: base de 5 a 8 dígitos, guion y dígito
- * verificador (`3870633-4`, `80012345-6`).
- */
-export const RUC_PATTERN = /^[0-9]{5,8}-[0-9]$/
-
-/** Ayuda contextual con los dos tamaños habituales. */
-export const RUC_FORMAT_HINT = 'Persona física: 3870633-4 · Empresa: 80012345-6'
-
-/** Solo dígitos del RUC, sin guion, con el tope de 9 posiciones. */
-export function normalizeRucDigits(value: string): string {
-  return onlyDigits(value).slice(0, RUC_INPUT_MAX_DIGITS)
-}
-
-/**
- * Máscara del campo RUC: deja escribir dígitos y **un** guion separador.
+ * Máscara y validación del RUC.
  *
- * - Sin guion se respetan los dígitos tal cual, hasta el tope de 9. Al llegar al
- *   noveno (base 8 + DV) el guion se inserta solo, porque ahí ya no hay dudas.
- * - Con guion, la base queda limitada a 8 dígitos y el verificador a 1.
- *
- * No fuerza el guion con 6–8 dígitos mientras se escribe: la persona física
- * puede seguir tipeando y el formato se resuelve en `autoFormatRuc` (al salir
- * del campo o antes de consultar la DNIT).
+ * La implementación canónica vive en `src/lib/format.ts` porque la comparten la
+ * ficha de pacientes y todo el módulo fiscal; acá se reexporta para que la
+ * facturación siga importando desde un único punto (`./invoicing-format`).
  */
-export function formatRucInput(value: string): string {
-  // Un guion al inicio no aporta (el campo arranca con la base): se descarta.
-  const cleaned = value.replace(/[^0-9-]/g, '').replace(/^-+/, '')
-  const hyphenIndex = cleaned.indexOf('-')
-
-  if (hyphenIndex === -1) {
-    const digits = cleaned.slice(0, RUC_INPUT_MAX_DIGITS)
-
-    if (digits.length <= RUC_BASE_MAX) return digits
-
-    return `${digits.slice(0, RUC_BASE_MAX)}-${digits.slice(RUC_BASE_MAX)}`
-  }
-
-  const base = onlyDigits(cleaned.slice(0, hyphenIndex)).slice(0, RUC_BASE_MAX)
-  const dv = onlyDigits(cleaned.slice(hyphenIndex + 1)).slice(0, 1)
-
-  return dv ? `${base}-${dv}` : `${base}-`
-}
-
-/**
- * Agrega el guion al salir del campo o al consultar la DNIT.
- *
- * Si el usuario escribió solo dígitos (`38706334`) se asume que el último es el
- * verificador. Con menos de 6 dígitos se devuelve tal cual: todavía no hay DV.
- */
-export function autoFormatRuc(value: string): string {
-  const trimmed = value.trim()
-
-  if (!trimmed) return ''
-  if (trimmed.includes('-')) return formatRucInput(trimmed)
-
-  const digits = onlyDigits(trimmed)
-
-  if (digits.length < RUC_BASE_MIN + 1) return digits
-
-  return `${digits.slice(0, -1)}-${digits.slice(-1)}`
-}
-
-export type RucParts = {
-  base: string
-  dv: string
-  /** `true` cuando `base` + `dv` cumplen `RUC_PATTERN`. */
-  isComplete: boolean
-}
-
-/** Descompone lo escrito en base y dígito verificador (con o sin guion). */
-export function splitRuc(value: string): RucParts {
-  const trimmed = value.trim()
-
-  if (trimmed.includes('-')) {
-    const [rawBase, ...rest] = trimmed.split('-')
-    const base = onlyDigits(rawBase)
-    const dv = onlyDigits(rest.join('')).slice(0, 1)
-
-    return { base, dv, isComplete: RUC_PATTERN.test(trimmed) }
-  }
-
-  const digits = onlyDigits(trimmed)
-
-  if (digits.length < RUC_BASE_MIN + 1) return { base: digits, dv: '', isComplete: false }
-
-  const base = digits.slice(0, -1)
-  const dv = digits.slice(-1)
-
-  return { base, dv, isComplete: RUC_PATTERN.test(`${base}-${dv}`) }
-}
-
-/** `true` si el RUC tiene base de 5 a 8 dígitos y verificador. */
-export function isValidRuc(value: string): boolean {
-  return RUC_PATTERN.test(value.trim())
-}
+export {
+  RUC_BASE_MAX,
+  RUC_BASE_MIN,
+  RUC_FORMAT_HINT,
+  RUC_INPUT_MAX_DIGITS,
+  RUC_PATTERN,
+  autoFormatRuc,
+  formatRucInput,
+  isValidRuc,
+  normalizeRucDigits,
+  splitRuc,
+  type RucParts,
+} from '../../lib/format'
 
 /** Fecha local `YYYY-MM-DD` (sin desfase de zona horaria). */
 export function getTodayKey(now: Date = new Date()): string {

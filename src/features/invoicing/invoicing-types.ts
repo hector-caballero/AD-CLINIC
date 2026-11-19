@@ -1,3 +1,4 @@
+import { formatCI, normalizeRucDigits } from '../../lib/format'
 import type { PaymentMethod } from '../cash/cash-types'
 
 /**
@@ -25,6 +26,15 @@ export type TaxIssuerKind = 'individual' | 'company'
 export type TimbradoMode = 'manual' | 'preprinted' | 'autoimpresor' | 'electronic'
 
 export type InvoiceStatus = 'issued' | 'cancelled'
+
+/** Condición de pago: al contado o a crédito (en cuotas o a plazo). */
+export type InvoiceCondition = 'contado' | 'credito'
+
+/** Estado de cobro de una factura, derivado de los cobros aplicados. */
+export type InvoicePaymentStatus = 'unpaid' | 'partial' | 'paid'
+
+/** Estado de una cuota del plan de pagos. */
+export type InstallmentStatus = 'pending' | 'partial' | 'paid' | 'overdue'
 
 /** Tratamiento fiscal del importe facturado. */
 export type VatRate = 'iva_10' | 'iva_5' | 'exempt'
@@ -60,6 +70,12 @@ export type ClinicTaxSettings = {
   address: string | null
   phone: string | null
   email: string | null
+  /**
+   * Datos con los que se emite una factura a consumidor final. El contador puede
+   * cambiarlos en Configuración (`44444401-7` es el RUC genérico de la DNIT).
+   */
+  occasional_customer_name: string | null
+  occasional_customer_ruc: string | null
   created_at: string
   updated_at: string
 }
@@ -124,6 +140,16 @@ export type Invoice = {
   iva_10: number
   iva_5: number
   total: number
+  /** Condición de pago elegida al emitir. */
+  condition: InvoiceCondition
+  /** Cuotas del plan de pagos (`1` = pago único). */
+  installments_count: number
+  /** Suma de los cobros ya aplicados a esta factura. */
+  paid_amount: number
+  /** Saldo pendiente (`total - paid_amount`); lo calcula la base. */
+  balance: number
+  /** Estado de cobro derivado de `paid_amount`. */
+  payment_status: InvoicePaymentStatus
   currency: string
   payment_method: PaymentMethod | null
   notes: string | null
@@ -133,6 +159,50 @@ export type Invoice = {
   updated_at: string
   issuer: InvoiceIssuerRef | null
   timbrado: InvoiceTimbradoRef | null
+  /** Plan de cuotas embebido (vacío si la factura no tiene plan). */
+  installments?: InvoiceInstallment[]
+}
+
+/** Cuota del plan de pagos (`public.invoice_installments`). */
+export type InvoiceInstallment = {
+  id: string
+  invoice_id: string
+  /** Número de cuota, empezando en 1. */
+  number: number
+  due_date: string
+  amount: number
+  paid_amount: number
+  status: InstallmentStatus
+  notes: string | null
+}
+
+/** Cobro de caja aplicado a una factura (`public.invoice_payment_allocations`). */
+export type InvoicePaymentAllocation = {
+  id: string
+  invoice_id: string
+  installment_id: string | null
+  transaction_id: string
+  amount: number
+  created_at: string
+}
+
+/** Un cobro ya registrado en caja que se aplica a la factura que se emite. */
+export type InvoicePaymentAllocationInput = {
+  transactionId: string
+  amount: number
+  installmentId?: string | null
+}
+
+/** Cobro nuevo que se registra en caja junto con la emisión. */
+export type InvoiceCashPaymentInput = {
+  amount: number
+  method: PaymentMethod | null
+  receiptNumber?: string | null
+  paidAt?: string | null
+  reference?: string | null
+  notes?: string | null
+  /** Cuota a la que se imputa (por defecto, la primera impaga). */
+  installmentId?: string | null
 }
 
 /** Factura de gasto / compra (`public.expense_invoices`). */
@@ -168,7 +238,7 @@ export const TAX_ISSUER_SELECT =
 
 /** Columnas de `clinic_tax_settings`. */
 export const CLINIC_TAX_SETTINGS_SELECT =
-  'id, operational_mode, default_issuer_id, legal_name, ruc, address, phone, email, created_at, updated_at'
+  'id, operational_mode, default_issuer_id, legal_name, ruc, address, phone, email, occasional_customer_name, occasional_customer_ruc, created_at, updated_at'
 
 /** Columnas de `invoicing_timbrados`. */
 export const TIMBRADO_SELECT = [
@@ -190,6 +260,28 @@ export const TIMBRADO_SELECT = [
 ].join(', ')
 
 const ISSUER_EMBED = 'id, display_name, ruc, kind'
+
+/** Columnas de `invoice_installments`. */
+export const INSTALLMENT_SELECT = [
+  'id',
+  'invoice_id',
+  'number',
+  'due_date',
+  'amount',
+  'paid_amount',
+  'status',
+  'notes',
+].join(', ')
+
+/** Columnas de `invoice_payment_allocations`. */
+export const PAYMENT_ALLOCATION_SELECT = [
+  'id',
+  'invoice_id',
+  'installment_id',
+  'transaction_id',
+  'amount',
+  'created_at',
+].join(', ')
 
 /** Columnas de `invoices` con el emisor y el timbrado embebidos. */
 export const INVOICE_SELECT = [
@@ -219,6 +311,11 @@ export const INVOICE_SELECT = [
   'iva_10',
   'iva_5',
   'total',
+  'condition',
+  'installments_count',
+  'paid_amount',
+  'balance',
+  'payment_status',
   'currency',
   'payment_method',
   'notes',
@@ -228,6 +325,7 @@ export const INVOICE_SELECT = [
   'updated_at',
   `issuer:tax_issuers(${ISSUER_EMBED})`,
   'timbrado:invoicing_timbrados(id, timbrado_number, mode)',
+  `installments:invoice_installments(${INSTALLMENT_SELECT})`,
 ].join(', ')
 
 /** Columnas de `expense_invoices` con el emisor imputado embebido. */
@@ -366,6 +464,63 @@ export const VAT_RATE_LABELS: Record<VatRate, string> = {
 export const INVOICE_STATUS_META: Record<InvoiceStatus, { label: string; badge: string }> = {
   issued: { label: 'Emitida', badge: 'bg-emerald-50 text-emerald-700 ring-emerald-200' },
   cancelled: { label: 'Anulada', badge: 'bg-slate-100 text-slate-500 ring-slate-200' },
+}
+
+export const INVOICE_CONDITION_OPTIONS: {
+  value: InvoiceCondition
+  label: string
+  description: string
+}[] = [
+  {
+    value: 'contado',
+    label: 'Contado',
+    description: 'Se cobra al emitir. Permite registrar el cobro en caja en el mismo paso.',
+  },
+  {
+    value: 'credito',
+    label: 'Crédito',
+    description: 'Se paga en cuotas: la factura queda con saldo hasta el último cobro.',
+  },
+]
+
+export const INVOICE_CONDITION_LABELS: Record<InvoiceCondition, string> = {
+  contado: 'Contado',
+  credito: 'Crédito',
+}
+
+/**
+ * Estado de cobro de la factura.
+ * Verde = saldada, ámbar = con saldo, rojo = todavía sin cobros.
+ */
+export const PAYMENT_STATUS_META: Record<
+  InvoicePaymentStatus,
+  { label: string; badge: string; amount: string }
+> = {
+  unpaid: {
+    label: 'Sin cobrar',
+    badge: 'bg-rose-50 text-rose-700 ring-rose-200',
+    amount: 'text-rose-700',
+  },
+  partial: {
+    label: 'Cobro parcial',
+    badge: 'bg-amber-50 text-amber-800 ring-amber-200',
+    amount: 'text-amber-700',
+  },
+  paid: {
+    label: 'Cobrada',
+    badge: 'bg-emerald-50 text-emerald-700 ring-emerald-200',
+    amount: 'text-emerald-700',
+  },
+}
+
+export const INSTALLMENT_STATUS_META: Record<
+  InstallmentStatus,
+  { label: string; badge: string }
+> = {
+  pending: { label: 'Pendiente', badge: 'bg-slate-100 text-slate-600 ring-slate-200' },
+  partial: { label: 'Parcial', badge: 'bg-amber-50 text-amber-800 ring-amber-200' },
+  paid: { label: 'Pagada', badge: 'bg-emerald-50 text-emerald-700 ring-emerald-200' },
+  overdue: { label: 'Vencida', badge: 'bg-rose-50 text-rose-700 ring-rose-200' },
 }
 
 /** Categorías sugeridas para clasificar el gasto. */
@@ -513,11 +668,96 @@ export function suggestIssuer(
 /** Documento del cliente tal como se imprime en la factura. */
 export function getInvoiceCustomerDocument(
   invoice: Pick<Invoice, 'customer_ruc' | 'customer_document'>,
+  occasionalRuc?: string | null,
 ): string {
-  if (invoice.customer_ruc) return `RUC ${invoice.customer_ruc}`
-  if (invoice.customer_document) return `CI ${invoice.customer_document}`
+  if (invoice.customer_ruc) {
+    const label = isSameRuc(invoice.customer_ruc, occasionalRuc) ? 'Ocasional' : 'RUC'
+
+    return `${label}: ${invoice.customer_ruc}`
+  }
+
+  if (invoice.customer_document) {
+    // Los documentos viejos pueden ser pasaportes alfanuméricos: se muestran tal cual.
+    const document = /^\d+$/.test(invoice.customer_document)
+      ? formatCI(invoice.customer_document)
+      : invoice.customer_document
+
+    return `C.I.: ${document}`
+  }
 
   return 'Sin documento'
+}
+
+/** Nombre y RUC con los que se factura a consumidor final. */
+export const DEFAULT_OCCASIONAL_CUSTOMER_NAME = 'CLIENTE OCASIONAL'
+
+/**
+ * RUC genérico de la DNIT para consumidor final. El contador puede reemplazarlo
+ * (por ejemplo por `X`) desde Configuración.
+ */
+export const DEFAULT_OCCASIONAL_CUSTOMER_RUC = '44444401-7'
+
+/** Condición fiscal del receptor elegida al emitir la factura. */
+export type CustomerTaxKind = 'contribuyente' | 'no_contribuyente' | 'ocasional'
+
+export type CustomerTaxKindOption = {
+  value: CustomerTaxKind
+  label: string
+  description: string
+}
+
+export const CUSTOMER_TAX_KIND_OPTIONS: CustomerTaxKindOption[] = [
+  {
+    value: 'contribuyente',
+    label: 'Contribuyente (RUC)',
+    description: 'La factura se emite a nombre de una empresa o persona con RUC.',
+  },
+  {
+    value: 'no_contribuyente',
+    label: 'No contribuyente (C.I.)',
+    description: 'Persona física sin RUC: se identifica con su cédula, sin dígito verificador.',
+  },
+  {
+    value: 'ocasional',
+    label: 'Cliente ocasional',
+    description: 'Consumidor final con el RUC genérico de la DNIT.',
+  },
+]
+
+/** Dos RUC son iguales aunque uno venga con guion y el otro solo con dígitos. */
+export function isSameRuc(
+  left: string | null | undefined,
+  right: string | null | undefined,
+): boolean {
+  const a = (left ?? '').trim()
+  const b = (right ?? '').trim()
+
+  if (!a || !b) return false
+
+  const digitsA = normalizeRucDigits(a)
+  const digitsB = normalizeRucDigits(b)
+
+  if (digitsA && digitsB) return digitsA === digitsB
+
+  return a.toLowerCase() === b.toLowerCase()
+}
+
+/**
+ * Datos del cliente ocasional configurados en la clínica.
+ *
+ * Si la configuración todavía no tiene valores (o la migración no se aplicó) se
+ * usan los genéricos de la DNIT, que son los que espera el contador.
+ */
+export function getOccasionalCustomer(
+  settings: Pick<
+    ClinicTaxSettings,
+    'occasional_customer_name' | 'occasional_customer_ruc'
+  > | null,
+): { name: string; ruc: string } {
+  return {
+    name: settings?.occasional_customer_name?.trim() || DEFAULT_OCCASIONAL_CUSTOMER_NAME,
+    ruc: settings?.occasional_customer_ruc?.trim() || DEFAULT_OCCASIONAL_CUSTOMER_RUC,
+  }
 }
 
 /** A quién se imputó el gasto: la clínica o un emisor/doctor. */
@@ -527,4 +767,80 @@ export function getExpenseAttributionLabel(
   return expense.attributed_issuer
     ? getIssuerName(expense.attributed_issuer)
     : 'Clínica (general)'
+}
+
+
+// -----------------------------------------------------------------------------
+// Cobros y saldos
+// -----------------------------------------------------------------------------
+
+/** Campos mínimos para calcular el estado de cobro de una factura. */
+export type InvoiceTotals = {
+  total: number
+  paid_amount?: number | null
+  balance?: number | null
+  status?: InvoiceStatus
+}
+
+/** Lo efectivamente cobrado (nunca más que el total). */
+export function getInvoicePaidAmount(invoice: InvoiceTotals): number {
+  const paid = Number(invoice.paid_amount ?? 0)
+
+  if (!Number.isFinite(paid) || paid <= 0) return 0
+
+  return Math.min(paid, invoice.total)
+}
+
+/** Saldo pendiente: la columna generada `balance` o, si falta, la resta. */
+export function getInvoiceBalance(invoice: InvoiceTotals): number {
+  if (invoice.status === 'cancelled') return 0
+
+  const balance = Number(invoice.balance)
+
+  if (Number.isFinite(balance) && invoice.balance !== null && invoice.balance !== undefined) {
+    return Math.max(balance, 0)
+  }
+
+  return Math.max(invoice.total - getInvoicePaidAmount(invoice), 0)
+}
+
+/**
+ * Estado de cobro calculado en el cliente.
+ *
+ * La base lo mantiene en `payment_status`; esto sirve para pintar una factura
+ * recién creada (antes de recargar) sin esperar la respuesta.
+ */
+export function getInvoicePaymentState(invoice: InvoiceTotals): InvoicePaymentStatus {
+  if (invoice.status === 'cancelled') return 'unpaid'
+
+  const paid = getInvoicePaidAmount(invoice)
+
+  if (paid <= 0) return 'unpaid'
+
+  return paid >= invoice.total ? 'paid' : 'partial'
+}
+
+/** Cuotas del plan, ordenadas por número. */
+export function getInvoiceInstallments(
+  invoice: Pick<Invoice, 'installments'>,
+): InvoiceInstallment[] {
+  return [...(invoice.installments ?? [])].sort((left, right) => left.number - right.number)
+}
+
+/** Primera cuota con saldo: la que conviene cobrar. */
+export function getNextDueInstallment(
+  invoice: Pick<Invoice, 'installments'>,
+): InvoiceInstallment | null {
+  return getInvoiceInstallments(invoice).find((item) => item.paid_amount < item.amount) ?? null
+}
+
+/** `Contado` · `Crédito · 3 cuotas`. */
+export function getInvoiceConditionLabel(
+  invoice: Pick<Invoice, 'condition' | 'installments_count'>,
+): string {
+  if (invoice.condition !== 'credito') return INVOICE_CONDITION_LABELS.contado
+
+  const count = invoice.installments_count > 1 ? ` · ${invoice.installments_count} cuotas` : ''
+
+  return `${INVOICE_CONDITION_LABELS.credito}${count}`
 }

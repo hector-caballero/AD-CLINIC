@@ -1,7 +1,13 @@
 import { FileText, Wallet } from 'lucide-react'
 import { formatPatientDocument, formatPYG, formatShortDate, getInitials } from '../../lib/format'
+import type { TransactionInvoicing } from '../invoicing/invoicing-service'
+import { InvoicingBadge } from './InvoicingBadge'
 import { formatMovementDate, formatMovementTime } from './cash-dates'
-import { formatSignedAmount, getMovementTimestamp } from './cash-format'
+import {
+  formatSignedAmount,
+  getMovementTimestamp,
+  isInvoiceableAmount,
+} from './cash-format'
 import {
   PAYMENT_METHOD_LABELS,
   TRANSACTION_STATUS_META,
@@ -17,11 +23,27 @@ type MovementsTableProps = {
   onOpenAccount: (patientId: string) => void
   /** Emite la factura legal del cobro (solo pagos confirmados). */
   onInvoice?: (movement: CashMovement) => void
+  /** Estado de facturación por movimiento (`transaction_invoicing`). */
+  invoicing?: Map<string, TransactionInvoicing>
+  /** Cobros marcados para emitir una factura conjunta. */
+  selectedIds?: string[]
+  /** Marca / desmarca un cobro para la factura conjunta. */
+  onToggleSelect?: (movement: CashMovement) => void
 }
 
 /** Un cobro facturable es un pago confirmado: el dinero ya entró a la caja. */
 function isInvoiceable(movement: CashMovement): boolean {
   return movement.type === 'payment' && movement.status === 'paid'
+}
+
+/**
+ * Candidato a facturar: pago confirmado y con importe sin facturar.
+ * Si la vista de facturación todavía no llegó, se ofrece igual (la base valida).
+ */
+function canInvoice(movement: CashMovement, invoicing?: Map<string, TransactionInvoicing>): boolean {
+  if (!isInvoiceable(movement)) return false
+
+  return isInvoiceableAmount(invoicing?.get(movement.id))
 }
 
 const HEAD_CLASS = 'px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500'
@@ -78,7 +100,14 @@ function MovementAmount({ movement }: { movement: CashMovement }) {
  * Cada fila resume fecha, paciente, concepto, monto, método y estado; el botón
  * de la última columna abre el estado de cuenta del paciente.
  */
-export function MovementsTable({ movements, onOpenAccount, onInvoice }: MovementsTableProps) {
+export function MovementsTable({
+  movements,
+  onOpenAccount,
+  onInvoice,
+  invoicing,
+  selectedIds = [],
+  onToggleSelect,
+}: MovementsTableProps) {
   return (
     <>
       <div className="hidden overflow-x-auto md:block">
@@ -86,6 +115,11 @@ export function MovementsTable({ movements, onOpenAccount, onInvoice }: Movement
           <caption className="sr-only">Movimientos de caja registrados en AD Clinic</caption>
           <thead className="bg-slate-50">
             <tr>
+              {onToggleSelect && (
+                <th scope="col" className="w-10 py-3 pl-4 pr-1">
+                  <span className="sr-only">Seleccionar para facturar</span>
+                </th>
+              )}
               <th scope="col" className={HEAD_CLASS}>
                 Fecha
               </th>
@@ -116,9 +150,30 @@ export function MovementsTable({ movements, onOpenAccount, onInvoice }: Movement
               const item = movement.patient_treatment
               const treatment = item?.treatment
               const notes = movement.notes?.trim()
+              const rowInvoicing = invoicing?.get(movement.id) ?? null
+              const isSelected = selectedIds.includes(movement.id)
+              const isSelectable = canInvoice(movement, invoicing)
 
               return (
-                <tr key={movement.id} className="align-top transition-colors hover:bg-slate-50/70">
+                <tr
+                  key={movement.id}
+                  className={`align-top transition-colors ${isSelected ? 'bg-brand-50/40' : 'hover:bg-slate-50/70'}`}
+                >
+                  {onToggleSelect && (
+                    <td className="py-3 pl-4 pr-1">
+                      {isSelectable ? (
+                        <input
+                          type="checkbox"
+                          checked={isSelected}
+                          onChange={() => onToggleSelect(movement)}
+                          aria-label={`Seleccionar el cobro de ${patientName} para facturar`}
+                          className="size-4 cursor-pointer rounded border-slate-300"
+                        />
+                      ) : (
+                        <span aria-hidden="true" className="block size-4" />
+                      )}
+                    </td>
+                  )}
                   <td className="whitespace-nowrap px-4 py-3">
                     <span className="block text-xs font-medium text-slate-700">
                       {formatMovementDate(timestamp)}
@@ -178,6 +233,11 @@ export function MovementsTable({ movements, onOpenAccount, onInvoice }: Movement
 
                   <td className="px-4 py-3">
                     <StatusBadge status={movement.status} />
+                    {isInvoiceable(movement) && rowInvoicing && (
+                      <div className="mt-1">
+                        <InvoicingBadge invoicing={rowInvoicing} showAvailable />
+                      </div>
+                    )}
                     {movement.receipt_number && (
                       <p className="mt-1 text-[11px] text-slate-400">
                         Recibo {movement.receipt_number}
@@ -192,7 +252,7 @@ export function MovementsTable({ movements, onOpenAccount, onInvoice }: Movement
 
                   <td className="px-4 py-3 text-right">
                     <div className="flex items-center justify-end gap-1.5">
-                      {onInvoice && isInvoiceable(movement) && (
+                      {onInvoice && canInvoice(movement, invoicing) && (
                         <button
                           type="button"
                           onClick={() => onInvoice(movement)}
@@ -227,12 +287,27 @@ export function MovementsTable({ movements, onOpenAccount, onInvoice }: Movement
         {movements.map((movement) => {
           const patientName = getMovementPatientName(movement)
           const timestamp = getMovementTimestamp(movement)
+          const rowInvoicing = invoicing?.get(movement.id) ?? null
+          const isSelected = selectedIds.includes(movement.id)
+          const isSelectable = canInvoice(movement, invoicing)
 
           return (
-            <li key={movement.id} className="px-4 py-4">
+            <li
+              key={movement.id}
+              className={`px-4 py-4 ${isSelected ? 'bg-brand-50/40' : ''}`}
+            >
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
                   <div className="flex flex-wrap items-center gap-1.5">
+                    {onToggleSelect && isSelectable && (
+                      <input
+                        type="checkbox"
+                        checked={isSelected}
+                        onChange={() => onToggleSelect(movement)}
+                        aria-label={`Seleccionar el cobro de ${patientName} para facturar`}
+                        className="size-4 rounded border-slate-300"
+                      />
+                    )}
                     <TypeBadge type={movement.type} />
                     <span className="text-xs text-slate-400">
                       {formatMovementDate(timestamp)} · {formatMovementTime(timestamp)}
@@ -249,6 +324,9 @@ export function MovementsTable({ movements, onOpenAccount, onInvoice }: Movement
               <div className="mt-2.5 flex flex-wrap items-center justify-between gap-2">
                 <div className="flex flex-wrap items-center gap-1.5">
                   <StatusBadge status={movement.status} />
+                  {isInvoiceable(movement) && rowInvoicing && (
+                    <InvoicingBadge invoicing={rowInvoicing} showAvailable />
+                  )}
                   <span className="text-xs text-slate-500">
                     {movement.method ? PAYMENT_METHOD_LABELS[movement.method] : 'Sin método'}
                   </span>
@@ -258,7 +336,7 @@ export function MovementsTable({ movements, onOpenAccount, onInvoice }: Movement
                 </div>
 
                 <div className="flex items-center gap-1.5">
-                  {onInvoice && isInvoiceable(movement) && (
+                  {onInvoice && canInvoice(movement, invoicing) && (
                     <button
                       type="button"
                       onClick={() => onInvoice(movement)}

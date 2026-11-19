@@ -1,9 +1,14 @@
-import { Ban } from 'lucide-react'
+import { Ban, Banknote } from 'lucide-react'
 import { formatPYG, formatShortDate } from '../../lib/format'
 import { getStoredIvaTotal } from './invoicing-tax'
 import {
   INVOICE_STATUS_META,
+  PAYMENT_STATUS_META,
   VAT_RATE_LABELS,
+  getInvoiceBalance,
+  getInvoiceConditionLabel,
+  getInvoicePaidAmount,
+  getInvoicePaymentState,
   getInvoiceCustomerDocument,
   getIssuerName,
   type Invoice,
@@ -11,7 +16,11 @@ import {
 
 type InvoicesTableProps = {
   invoices: Invoice[]
+  /** RUC genérico del cliente ocasional: se etiqueta como «Ocasional» en la tabla. */
+  occasionalRuc?: string | null
   onCancel: (invoice: Invoice) => void
+  /** Abre el registro de cobro/abono; sin handler no se muestra el botón. */
+  onRegisterPayment?: (invoice: Invoice) => void
 }
 
 const HEAD_CLASS = 'px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500'
@@ -23,6 +32,19 @@ function formatIssuedOn(value: string): string {
 
 function StatusBadge({ status }: { status: Invoice['status'] }) {
   const meta = INVOICE_STATUS_META[status]
+
+  return (
+    <span
+      className={`inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium ring-1 ${meta.badge}`}
+    >
+      <span aria-hidden="true" className="size-1.5 rounded-full bg-current" />
+      {meta.label}
+    </span>
+  )
+}
+
+function PaymentBadge({ invoice }: { invoice: Invoice }) {
+  const meta = PAYMENT_STATUS_META[getInvoicePaymentState(invoice)]
 
   return (
     <span
@@ -58,10 +80,16 @@ function CancelButton({
  * Libro de facturas emitidas.
  *
  * Muestra el número fiscal, el emisor (clave en el modo multi-emisor), el
- * cliente con su documento, el IVA despejado y el total. Las anuladas quedan
+ * cliente con su documento, el IVA despejado, el total y el estado de cobro
+ * (cobrada, abono parcial o sin cobrar) con su saldo. Las anuladas quedan
  * visibles con su motivo: una factura legal no se borra, se anula.
  */
-export function InvoicesTable({ invoices, onCancel }: InvoicesTableProps) {
+export function InvoicesTable({
+  invoices,
+  occasionalRuc,
+  onCancel,
+  onRegisterPayment,
+}: InvoicesTableProps) {
   return (
     <>
       <div className="hidden overflow-x-auto md:block">
@@ -79,13 +107,16 @@ export function InvoicesTable({ invoices, onCancel }: InvoicesTableProps) {
                 Emisor
               </th>
               <th scope="col" className={HEAD_CLASS}>
-                Cliente
+                Cliente / RUC · C.I.
               </th>
               <th scope="col" className={`${HEAD_CLASS} text-right`}>
                 IVA
               </th>
               <th scope="col" className={`${HEAD_CLASS} text-right`}>
                 Total
+              </th>
+              <th scope="col" className={HEAD_CLASS}>
+                Cobro
               </th>
               <th scope="col" className={HEAD_CLASS}>
                 Estado
@@ -99,6 +130,9 @@ export function InvoicesTable({ invoices, onCancel }: InvoicesTableProps) {
 
             {invoices.map((invoice) => {
               const cancelled = invoice.status === 'cancelled'
+              const balance = getInvoiceBalance(invoice)
+              const paid = getInvoicePaidAmount(invoice)
+              const canCollect = !cancelled && balance > 0
 
               return (
                 <tr key={invoice.id} className={cancelled ? 'bg-slate-50/70' : undefined}>
@@ -140,8 +174,8 @@ export function InvoicesTable({ invoices, onCancel }: InvoicesTableProps) {
                     <p className="max-w-48 truncate text-sm font-medium text-slate-900">
                       {invoice.customer_name}
                     </p>
-                    <p className="mt-0.5 text-[11px] text-slate-400">
-                      {getInvoiceCustomerDocument(invoice)}
+                    <p className="mt-0.5 whitespace-nowrap font-mono text-[11px] text-slate-500">
+                      {getInvoiceCustomerDocument(invoice, occasionalRuc)}
                     </p>
                   </td>
 
@@ -163,6 +197,29 @@ export function InvoicesTable({ invoices, onCancel }: InvoicesTableProps) {
                   </td>
 
                   <td className="px-4 py-3">
+                    {cancelled ? (
+                      <span className="text-[11px] text-slate-400">—</span>
+                    ) : (
+                      <>
+                        <PaymentBadge invoice={invoice} />
+                        <p className="mt-1 whitespace-nowrap text-[11px] tabular-nums text-slate-500">
+                          Cobrado {formatPYG(paid)}
+                        </p>
+                        {balance > 0 && (
+                          <p className="whitespace-nowrap text-[11px] font-medium tabular-nums text-amber-700">
+                            Saldo {formatPYG(balance)}
+                          </p>
+                        )}
+                        {invoice.installments_count > 1 && (
+                          <p className="whitespace-nowrap text-[10px] text-slate-400">
+                            {getInvoiceConditionLabel(invoice)}
+                          </p>
+                        )}
+                      </>
+                    )}
+                  </td>
+
+                  <td className="px-4 py-3">
                     <StatusBadge status={invoice.status} />
                     {cancelled && invoice.cancellation_reason && (
                       <p
@@ -178,7 +235,21 @@ export function InvoicesTable({ invoices, onCancel }: InvoicesTableProps) {
                     {cancelled ? (
                       <span className="text-[11px] text-slate-400">—</span>
                     ) : (
-                      <CancelButton invoice={invoice} onCancel={onCancel} />
+                      <div className="flex items-center justify-end gap-1.5">
+                        {canCollect && onRegisterPayment && (
+                          <button
+                            type="button"
+                            onClick={() => onRegisterPayment(invoice)}
+                            aria-label={`Registrar cobro de la factura ${invoice.invoice_number}`}
+                            title={`Registrar cobro · saldo ${formatPYG(balance)}`}
+                            className="inline-flex items-center gap-1 rounded-lg border border-slate-300 bg-white/85 px-2 py-1.5 text-[11px] font-medium text-slate-600 transition-colors hover:border-emerald-200 hover:bg-emerald-50 hover:text-emerald-700"
+                          >
+                            <Banknote className="size-4" aria-hidden="true" />
+                            Cobrar
+                          </button>
+                        )}
+                        <CancelButton invoice={invoice} onCancel={onCancel} />
+                      </div>
                     )}
                   </td>
                 </tr>
@@ -191,6 +262,9 @@ export function InvoicesTable({ invoices, onCancel }: InvoicesTableProps) {
       <ul className="divide-y divide-slate-100 md:hidden">
         {invoices.map((invoice) => {
           const cancelled = invoice.status === 'cancelled'
+          const balance = getInvoiceBalance(invoice)
+          const paid = getInvoicePaidAmount(invoice)
+          const canCollect = !cancelled && balance > 0
 
           return (
             <li key={invoice.id} className="px-4 py-4">
@@ -198,6 +272,7 @@ export function InvoicesTable({ invoices, onCancel }: InvoicesTableProps) {
                 <div className="min-w-0">
                   <div className="flex flex-wrap items-center gap-1.5">
                     <StatusBadge status={invoice.status} />
+                    {!cancelled && <PaymentBadge invoice={invoice} />}
                     <span className="text-xs text-slate-400">
                       {formatIssuedOn(invoice.issued_at)}
                     </span>
@@ -225,22 +300,47 @@ export function InvoicesTable({ invoices, onCancel }: InvoicesTableProps) {
                   <p className="mt-0.5 whitespace-nowrap text-[11px] tabular-nums text-slate-400">
                     IVA {formatPYG(getStoredIvaTotal(invoice))}
                   </p>
+                  {!cancelled && (
+                    <p className="mt-0.5 whitespace-nowrap text-[11px] tabular-nums text-slate-500">
+                      Cobrado {formatPYG(paid)}
+                      {balance > 0 && (
+                        <span className="font-medium text-amber-700"> · Saldo {formatPYG(balance)}</span>
+                      )}
+                    </p>
+                  )}
+                  {!cancelled && invoice.installments_count > 1 && (
+                    <p className="mt-0.5 whitespace-nowrap text-[10px] text-slate-400">
+                      {getInvoiceConditionLabel(invoice)}
+                    </p>
+                  )}
                 </div>
               </div>
 
               <div className="mt-2.5 flex flex-wrap items-center justify-between gap-2">
-                <span className="truncate text-xs text-slate-500">
-                  {getInvoiceCustomerDocument(invoice)}
+                <span className="truncate font-mono text-xs text-slate-500">
+                  {getInvoiceCustomerDocument(invoice, occasionalRuc)}
                 </span>
                 {!cancelled && (
-                  <button
-                    type="button"
-                    onClick={() => onCancel(invoice)}
-                    className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white/85 px-2.5 py-1 text-xs font-medium text-slate-700 transition-colors hover:border-red-200 hover:bg-red-50 hover:text-red-600"
-                  >
-                    <Ban className="size-3.5" aria-hidden="true" />
-                    Anular
-                  </button>
+                  <div className="flex items-center gap-1.5">
+                    {canCollect && onRegisterPayment && (
+                      <button
+                        type="button"
+                        onClick={() => onRegisterPayment(invoice)}
+                        className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white/85 px-2.5 py-1 text-xs font-medium text-slate-700 transition-colors hover:border-emerald-200 hover:bg-emerald-50 hover:text-emerald-700"
+                      >
+                        <Banknote className="size-3.5" aria-hidden="true" />
+                        Cobrar
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => onCancel(invoice)}
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white/85 px-2.5 py-1 text-xs font-medium text-slate-700 transition-colors hover:border-red-200 hover:bg-red-50 hover:text-red-600"
+                    >
+                      <Ban className="size-3.5" aria-hidden="true" />
+                      Anular
+                    </button>
+                  </div>
                 )}
               </div>
             </li>

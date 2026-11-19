@@ -3,8 +3,13 @@
  *
  * Convenciones de Paraguay:
  * - Moneda: guaraní (PYG), sin decimales y con punto como separador de miles.
- * - Documentos: C.I. `1.234.567`, RUC `80012345-6`, pasaporte alfanumérico.
+ * - Documentos: C.I. `1.234.567` (solo dígitos, sin DV), RUC `3870633-4`
+ *   (base de 5 a 8 dígitos + dígito verificador), pasaporte alfanumérico.
  * - Teléfonos: móvil `0981 123 456`, fijo `021 123 456`, internacional `+595 ...`.
+ *
+ * El RUC es la única fuente de la máscara fiscal paraguaya: la usan la ficha de
+ * pacientes y todo el módulo de facturación (`invoicing-format.ts` reexporta
+ * estas funciones para conservar los nombres históricos).
  */
 
 /** Tipo de documento admitido por la ficha de pacientes. */
@@ -63,24 +68,123 @@ export function parsePYGInput(value: string): number {
   return Number.isFinite(amount) ? amount : 0
 }
 
-/** `1.234.567` — Cédula de Identidad paraguaya (máximo 8 dígitos). */
+/** `1.234.567` — Cédula de Identidad paraguaya (solo dígitos, máximo 8, sin DV). */
 export function formatCI(value: string): string {
   return groupThousands(onlyDigits(value).slice(0, 8))
 }
 
-/** `80012345-6` — RUC: hasta 8 dígitos de base + dígito verificador. */
-export function formatRUC(value: string): string {
-  const digits = onlyDigits(value).slice(0, 9)
+// -----------------------------------------------------------------------------
+// RUC (Registro Único del Contribuyente)
+// -----------------------------------------------------------------------------
 
-  if (digits.length <= 8) return digits
+/** Base del RUC: las personas físicas usan 6–7 dígitos y las empresas 8. */
+export const RUC_BASE_MIN = 5
+export const RUC_BASE_MAX = 8
 
-  return `${digits.slice(0, 8)}-${digits.slice(8)}`
+/** Máximo de dígitos del campo RUC (base + dígito verificador). */
+export const RUC_INPUT_MAX_DIGITS = RUC_BASE_MAX + 1
+
+/**
+ * RUC completo tal como lo exige la DNIT: base de 5 a 8 dígitos, guion y dígito
+ * verificador (`3870633-4`, `80012345-6`).
+ */
+export const RUC_PATTERN = /^[0-9]{5,8}-[0-9]$/
+
+/** Ayuda contextual con los dos tamaños habituales. */
+export const RUC_FORMAT_HINT = 'Persona física: 3870633-4 · Empresa: 80012345-6'
+
+/** Solo dígitos del RUC, sin guion, con el tope de 9 posiciones. */
+export function normalizeRucDigits(value: string): string {
+  return onlyDigits(value).slice(0, RUC_INPUT_MAX_DIGITS)
+}
+
+/**
+ * Máscara del campo RUC: deja escribir dígitos y **un** guion separador.
+ *
+ * - Sin guion se respetan los dígitos tal cual, hasta el tope de 9. Al llegar al
+ *   noveno (base 8 + DV) el guion se inserta solo, porque ahí ya no hay dudas.
+ * - Con guion, la base queda limitada a 8 dígitos y el verificador a 1.
+ *
+ * No fuerza el guion con 6–8 dígitos mientras se escribe: la persona física
+ * puede seguir tipeando y el formato se resuelve en `autoFormatRuc` (al salir
+ * del campo o antes de consultar la DNIT).
+ */
+export function formatRucInput(value: string): string {
+  // Un guion al inicio no aporta (el campo arranca con la base): se descarta.
+  const cleaned = value.replace(/[^0-9-]/g, '').replace(/^-+/, '')
+  const hyphenIndex = cleaned.indexOf('-')
+
+  if (hyphenIndex === -1) {
+    const digits = cleaned.slice(0, RUC_INPUT_MAX_DIGITS)
+
+    if (digits.length <= RUC_BASE_MAX) return digits
+
+    return `${digits.slice(0, RUC_BASE_MAX)}-${digits.slice(RUC_BASE_MAX)}`
+  }
+
+  const base = onlyDigits(cleaned.slice(0, hyphenIndex)).slice(0, RUC_BASE_MAX)
+  const dv = onlyDigits(cleaned.slice(hyphenIndex + 1)).slice(0, 1)
+
+  return dv ? `${base}-${dv}` : `${base}-`
+}
+
+/**
+ * Agrega el guion al salir del campo o al consultar la DNIT.
+ *
+ * Si el usuario escribió solo dígitos (`38706334`) se asume que el último es el
+ * verificador. Con menos de 6 dígitos se devuelve tal cual: todavía no hay DV.
+ */
+export function autoFormatRuc(value: string): string {
+  const trimmed = value.trim()
+
+  if (!trimmed) return ''
+  if (trimmed.includes('-')) return formatRucInput(trimmed)
+
+  const digits = onlyDigits(trimmed)
+
+  if (digits.length < RUC_BASE_MIN + 1) return digits
+
+  return `${digits.slice(0, -1)}-${digits.slice(-1)}`
+}
+
+export type RucParts = {
+  base: string
+  dv: string
+  /** `true` cuando `base` + `dv` cumplen `RUC_PATTERN`. */
+  isComplete: boolean
+}
+
+/** Descompone lo escrito en base y dígito verificador (con o sin guion). */
+export function splitRuc(value: string): RucParts {
+  const trimmed = value.trim()
+
+  if (trimmed.includes('-')) {
+    const [rawBase, ...rest] = trimmed.split('-')
+    const base = onlyDigits(rawBase)
+    const dv = onlyDigits(rest.join('')).slice(0, 1)
+
+    return { base, dv, isComplete: RUC_PATTERN.test(trimmed) }
+  }
+
+  const digits = onlyDigits(trimmed)
+
+  if (digits.length < RUC_BASE_MIN + 1) return { base: digits, dv: '', isComplete: false }
+
+  const base = digits.slice(0, -1)
+  const dv = digits.slice(-1)
+
+  return { base, dv, isComplete: RUC_PATTERN.test(`${base}-${dv}`) }
+}
+
+/** `true` si el RUC tiene base de 5 a 8 dígitos y verificador. */
+export function isValidRuc(value: string): boolean {
+  return RUC_PATTERN.test(value.trim())
 }
 
 /** Formatea el documento mientras se escribe, según el tipo elegido. */
 export function formatDocumentNumber(value: string, type: ParaguayDocumentType): string {
   if (type === 'CI') return formatCI(value)
-  if (type === 'RUC') return formatRUC(value)
+  if (type === 'RUC') return formatRucInput(value)
 
   return value
     .replace(/[^a-zA-Z0-9]/g, '')
@@ -97,7 +201,11 @@ export function normalizeDocumentNumber(
 
   if (type === 'Pasaporte') return source.replace(/[^a-zA-Z0-9]/g, '').toUpperCase()
 
-  return onlyDigits(source)
+  // La C.I. no lleva dígito verificador: si alguien escribe `4512789-0` se
+  // descarta lo que sigue al guion.
+  const [base] = type === 'CI' ? source.split('-') : [source]
+
+  return onlyDigits(base)
 }
 
 /** Normaliza el valor guardado en `patients.document_type` (tolera datos viejos). */
@@ -109,20 +217,23 @@ export function resolveDocumentType(value: string | null | undefined): ParaguayD
 
 /**
  * Validación estructural (no calcula el dígito verificador del RUC).
- * El RUC se acepta con o sin dígito verificador porque hay formularios que
- * piden solo la base.
+ *
+ * - C.I.: 5 a 8 dígitos, sin dígito verificador.
+ * - RUC: base de 5 a 8 dígitos + verificador (`3870633-4`). Se acepta lo
+ *   escrito sin guion porque el formato se resuelve al salir del campo.
+ * - Pasaporte: 6 a 12 letras o números.
  */
 export function isValidDocumentNumber(value: string, type: ParaguayDocumentType): boolean {
   const normalized = normalizeDocumentNumber(value, type)
 
   if (!normalized) return false
   if (type === 'CI') return /^\d{5,8}$/.test(normalized)
-  if (type === 'RUC') return /^\d{7,9}$/.test(normalized)
+  if (type === 'RUC') return isValidRuc(autoFormatRuc(normalized))
 
   return /^[A-Z0-9]{6,12}$/.test(normalized)
 }
 
-/** Etiqueta corta del documento: `C.I. 1.234.567`, `RUC 80012345-6`. */
+/** Etiqueta corta del documento: `C.I. 1.234.567`, `RUC 3870633-4`. */
 export function formatPatientDocument(
   documentType: string | null | undefined,
   documentNumber: string | null | undefined,
@@ -138,7 +249,12 @@ export function formatPatientDocument(
     Pasaporte: 'Pasaporte',
   }
 
-  return `${labels[type]} ${formatDocumentNumber(raw, type)}`
+  const formatted =
+    type === 'RUC'
+      ? autoFormatRuc(raw)
+      : formatDocumentNumber(normalizeDocumentNumber(raw, type), type)
+
+  return `${labels[type]} ${formatted}`
 }
 
 /** Teléfono paraguayo con máscara visual (`0981 123 456`). */

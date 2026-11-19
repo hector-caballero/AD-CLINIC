@@ -38,6 +38,8 @@ type RucLookupFieldProps = {
   required?: boolean
   placeholder?: string
   helpText?: ReactNode
+  /** Error del formulario que contiene el campo (se muestra en rojo). */
+  error?: string
   /** Texto del botón / aria-label; por defecto «Buscar en DNIT». */
   actionLabel?: string
 }
@@ -74,22 +76,24 @@ export function RucLookupField({
   required = false,
   placeholder = '3870633-4',
   helpText,
+  error: externalError,
   actionLabel = 'Buscar en DNIT',
 }: RucLookupFieldProps) {
   const [isSearching, setIsSearching] = useState(false)
   const [result, setResult] = useState<RucLookupResult | null>(null)
-  const [error, setError] = useState<string | null>(null)
+  const [lookupError, setLookupError] = useState<string | null>(null)
   const [isTouched, setIsTouched] = useState(false)
   /** RUC tal como se escribió antes de consultar (para avisar si la DNIT corrige el DV). */
   const [lookedUpFrom, setLookedUpFrom] = useState('')
 
   const feedbackId = `${id}-feedback`
+  const message = externalError ?? lookupError
   const formatWarning = isTouched && value.trim().length > 0 && !isValidRuc(autoFormatRuc(value))
 
   function handleChange(nextValue: string) {
     // Cualquier edición invalida el resultado anterior: hay que volver a buscar.
     setResult(null)
-    setError(null)
+    setLookupError(null)
     setLookedUpFrom('')
     onChange(formatRucInput(nextValue))
   }
@@ -111,12 +115,12 @@ export function RucLookupField({
 
     if (!isValidRuc(formatted)) {
       setResult(null)
-      setError(`Revisá el RUC: ${RUC_FORMAT_HINT}.`)
+      setLookupError(`Revisá el RUC: ${RUC_FORMAT_HINT}.`)
       return
     }
 
     setIsSearching(true)
-    setError(null)
+    setLookupError(null)
     setResult(null)
     setLookedUpFrom(formatted)
 
@@ -130,7 +134,7 @@ export function RucLookupField({
 
       onResolved?.(found)
     } catch (cause) {
-      setError(
+      setLookupError(
         cause instanceof RucLookupError
           ? cause.message
           : 'No se pudo consultar el RUC. Escribí el nombre a mano.',
@@ -174,7 +178,10 @@ export function RucLookupField({
           maxLength={12}
           placeholder={placeholder}
           aria-describedby={feedbackId}
-          className={`${INPUT_CLASS} font-mono`}
+          aria-invalid={externalError ? true : undefined}
+          className={`${INPUT_CLASS} font-mono ${
+            externalError ? 'border-red-300' : ''
+          }`}
         />
         <button
           type="button"
@@ -194,21 +201,21 @@ export function RucLookupField({
       </div>
 
       <div id={feedbackId} aria-live="polite">
-        {error ? (
+        {message ? (
           <p className="mt-1.5 flex items-start gap-1.5 rounded-lg bg-red-50 px-2.5 py-2 text-xs leading-relaxed text-red-700 ring-1 ring-red-200">
             <AlertCircle className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
-            <span>{error}</span>
+            <span>{message}</span>
           </p>
         ) : null}
 
-        {!error && formatWarning ? (
+        {!message && formatWarning ? (
           <p className="mt-1.5 flex items-start gap-1.5 text-xs leading-relaxed text-amber-700">
             <AlertTriangle className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
             <span>Formato esperado: {RUC_FORMAT_HINT}.</span>
           </p>
         ) : null}
 
-        {!error && result ? (
+        {!message && result ? (
           <div className="mt-1.5 rounded-xl bg-slate-50 px-2.5 py-2 ring-1 ring-slate-200">
             <div className="flex flex-wrap items-center gap-1.5">
               {isRucActivo(result) ? (
@@ -249,7 +256,7 @@ export function RucLookupField({
           </div>
         ) : null}
 
-        {!error && !result && helpText ? <p className={HELP_CLASS}>{helpText}</p> : null}
+        {!message && !result && helpText ? <p className={HELP_CLASS}>{helpText}</p> : null}
       </div>
     </div>
   )

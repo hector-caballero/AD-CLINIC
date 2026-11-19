@@ -1,18 +1,27 @@
 import { supabase } from '../../lib/supabase'
-import type { PaymentMethod } from '../cash/cash-types'
+import type { PaymentMethod, TransactionStatus, TransactionType } from '../cash/cash-types'
 import { autoFormatRuc, isValidRuc, RUC_FORMAT_HINT } from './invoicing-format'
 import { toInvoicingError } from './invoicing-errors'
+import type { InstallmentDraft } from './invoicing-payments'
 import { computeInvoiceBreakdown, computeVatBreakdown } from './invoicing-tax'
 import {
   CLINIC_TAX_SETTINGS_SELECT,
   EXPENSE_INVOICE_SELECT,
   INVOICE_SELECT,
+  INSTALLMENT_SELECT,
+  PAYMENT_ALLOCATION_SELECT,
   TAX_ISSUER_SELECT,
   TIMBRADO_SELECT,
+  getInvoicePaymentState,
   type ClinicTaxSettings,
   type ExpenseInvoice,
   type Invoice,
+  type InvoiceCashPaymentInput,
+  type InvoiceCondition,
+  type InvoiceInstallment,
   type InvoiceIssuerRef,
+  type InvoicePaymentAllocation,
+  type InvoicePaymentAllocationInput,
   type InvoiceTimbradoRef,
   type InvoicingTimbrado,
   type OperationalMode,
@@ -53,7 +62,27 @@ function firstOf<T>(value: T | T[] | null | undefined): T | null {
   return Array.isArray(value) ? (value[0] ?? null) : value
 }
 
+/** Igual que `firstOf`, pero para las relaciones que siempre son listas. */
+function firstOfArray<T>(value: T | T[] | null | undefined): T[] {
+  if (!value) return []
+
+  return Array.isArray(value) ? value : [value]
+}
+
+function normalizeInstallment(row: InvoiceInstallment): InvoiceInstallment {
+  return {
+    ...row,
+    number: toNumber(row.number),
+    amount: toNumber(row.amount),
+    paid_amount: toNumber(row.paid_amount),
+  }
+}
+
 function normalizeInvoice(row: Invoice): Invoice {
+  const total = toNumber(row.total)
+  const paidAmount = toNumber(row.paid_amount)
+  const installments = firstOfArray(row.installments).map(normalizeInstallment)
+
   return {
     ...row,
     sequence_number: toNumber(row.sequence_number),
@@ -62,9 +91,19 @@ function normalizeInvoice(row: Invoice): Invoice {
     amount_exempt: toNumber(row.amount_exempt),
     iva_10: toNumber(row.iva_10),
     iva_5: toNumber(row.iva_5),
-    total: toNumber(row.total),
+    total,
+    installments_count: toNumber(row.installments_count) || 1,
+    paid_amount: paidAmount,
+    balance:
+      row.balance === null || row.balance === undefined
+        ? Math.max(total - paidAmount, 0)
+        : toNumber(row.balance),
+    payment_status:
+      row.payment_status ??
+      getInvoicePaymentState({ total, paid_amount: paidAmount, status: row.status }),
     issuer: firstOf(row.issuer as InvoiceIssuerRef | InvoiceIssuerRef[] | null),
     timbrado: firstOf(row.timbrado as InvoiceTimbradoRef | InvoiceTimbradoRef[] | null),
+    installments: installments.sort((left, right) => left.number - right.number),
   }
 }
 
@@ -120,6 +159,8 @@ export type ClinicTaxSettingsInput = {
   address: string | null
   phone: string | null
   email: string | null
+  occasional_customer_name: string | null
+  occasional_customer_ruc: string | null
 }
 
 export async function saveClinicTaxSettings(
@@ -421,13 +462,76 @@ export type IssueInvoiceInput = {
   cdc: string | null
   notes: string | null
   issuedAt?: string | null
+  /** Contado (se cobra al emitir) o crédito (en cuotas o a plazo). */
+  condition?: InvoiceCondition
+  /** Plan de cuotas; la suma tiene que dar el total de la factura. */
+  installments?: InstallmentDraft[]
+  /** Cobros ya cobrados en caja que pagan esta factura (anticipos, abonos). */
+  paymentAllocations?: InvoicePaymentAllocationInput[]
+  /** Cobro nuevo: se registra en caja junto con la emisión. */
+  cashPayment?: InvoiceCashPaymentInput | null
+}
+
+/** Valida el plan de cuotas y los cobros antes de llegar a la base. */
+function assertPaymentPlan(input: IssueInvoiceInput, amount: number): void {
+  const installments = input.installments ?? []
+  const allocations = (input.paymentAllocations ?? []).filter((item) => item.amount > 0)
+
+  if (installments.length > 1 && input.condition === 'contado') {
+    throw new Error('Una factura al contado no puede tener cuotas. Cambiá la condición a crédito.')
+  }
+
+  if (installments.length > 0) {
+    if (installments.some((item) => !item.due_date || Math.round(item.amount) <= 0)) {
+      throw new Error('Cada cuota necesita fecha de vencimiento e importe mayor a cero.')
+    }
+
+    const planTotal = installments.reduce((sum, item) => sum + Math.round(item.amount), 0)
+
+    if (Math.abs(planTotal - amount) > 1) {
+      throw new Error(
+        `Las cuotas suman ${planTotal} y la factura es de ${amount}. Ajustá el plan antes de emitir.`,
+      )
+    }
+  }
+
+  const allocatedTotal = allocations.reduce((sum, item) => sum + Math.round(item.amount), 0)
+
+  if (allocatedTotal > amount) {
+    throw new Error('Los cobros aplicados superan el total de la factura.')
+  }
+
+  if (!input.cashPayment) return
+
+  if (allocations.length > 0) {
+    throw new Error('Elegí entre aplicar cobros existentes o registrar un cobro nuevo.')
+  }
+
+  const cashAmount = Math.round(input.cashPayment.amount)
+
+  if (!Number.isFinite(cashAmount) || cashAmount <= 0) {
+    throw new Error('El importe del cobro en caja debe ser mayor a cero.')
+  }
+
+  if (cashAmount > amount) {
+    throw new Error('El cobro en caja no puede superar el total de la factura.')
+  }
+
+  if (!input.patientId) {
+    throw new Error('Asociá un paciente para registrar el cobro en caja.')
+  }
+
+  if (!input.cashPayment.method) {
+    throw new Error('Elegí la forma de cobro (efectivo, tarjeta, transferencia…).')
+  }
 }
 
 /**
  * Emite una factura con `public.issue_invoice` (transacción atómica).
  *
  * La base decide el correlativo cuando `sequenceNumber` es `null`, valida el
- * rango y los duplicados, guarda el comprobante y actualiza `last_number`.
+ * rango y los duplicados, guarda el comprobante, crea el plan de cuotas y
+ * aplica los cobros de caja. Todo o nada: si un cobro falla, no queda factura.
  */
 export async function issueInvoice(input: IssueInvoiceInput): Promise<Invoice> {
   const amount = Math.round(input.amount)
@@ -443,7 +547,13 @@ export async function issueInvoice(input: IssueInvoiceInput): Promise<Invoice> {
     throw new Error('Ingresá el nombre o la razón social del cliente.')
   }
 
+  assertPaymentPlan(input, amount)
+
   const breakdown = computeInvoiceBreakdown(amount, input.vatRate)
+  const installments = input.installments ?? []
+  const allocations = (input.paymentAllocations ?? []).filter((item) => item.amount > 0)
+  const cashPayment = input.cashPayment ?? null
+
 
   const { data, error } = await supabase.rpc('issue_invoice', {
     p_timbrado_id: input.timbradoId,
@@ -467,6 +577,34 @@ export async function issueInvoice(input: IssueInvoiceInput): Promise<Invoice> {
       notes: input.notes?.trim() || null,
       issued_at: input.issuedAt ?? null,
       currency: 'PYG',
+      condition: input.condition ?? 'contado',
+      installments:
+        installments.length > 0
+          ? installments.map((item) => ({
+              number: item.number,
+              due_date: item.due_date,
+              amount: Math.round(item.amount),
+            }))
+          : null,
+      payment_allocations:
+        allocations.length > 0
+          ? allocations.map((item) => ({
+              transaction_id: item.transactionId,
+              amount: Math.round(item.amount),
+              installment_id: item.installmentId ?? null,
+            }))
+          : null,
+      cash_payment: cashPayment
+        ? {
+            amount: Math.round(cashPayment.amount),
+            method: cashPayment.method,
+            receipt_number: cashPayment.receiptNumber?.trim() || null,
+            paid_at: cashPayment.paidAt ?? null,
+            reference: cashPayment.reference?.trim() || null,
+            notes: cashPayment.notes?.trim() || null,
+            installment_id: cashPayment.installmentId ?? null,
+          }
+        : null,
     },
   })
 
@@ -509,6 +647,176 @@ export async function cancelInvoice(
   }
 
   return normalizeInvoice(asRow<Invoice>(data))
+}
+
+
+// -----------------------------------------------------------------------------
+// Cobros, abonos y cuotas
+// -----------------------------------------------------------------------------
+
+export type RegisterInvoicePaymentInput = {
+  invoiceId: string
+  /** Importe cobrado; puede ser un abono parcial. */
+  amount: number
+  method: PaymentMethod | null
+  /** Cuota que se imputa; `null` deja que la base elija la primera impaga. */
+  installmentId?: string | null
+  receiptNumber?: string | null
+  /** Fecha del cobro; si falta, la base usa `now()`. */
+  paidAt?: string | null
+  reference?: string | null
+  notes?: string | null
+}
+
+/**
+ * Registra un cobro o abono de una factura con `register_invoice_payment`.
+ *
+ * La base crea el movimiento en caja, lo aplica a la factura (y a la cuota) y
+ * recalcula `paid_amount` / `payment_status` en la misma transacción. Si algo
+ * falla no queda ni movimiento ni factura cobrada.
+ */
+export async function registerInvoicePayment(
+  input: RegisterInvoicePaymentInput,
+): Promise<Invoice> {
+  const amount = Math.round(input.amount)
+
+  if (!input.invoiceId) throw new Error('Elegí la factura que se va a cobrar.')
+  if (!Number.isFinite(amount) || amount <= 0) {
+    throw new Error('El importe del cobro debe ser mayor a cero.')
+  }
+
+  const { data, error } = await supabase.rpc('register_invoice_payment', {
+    p_payment: {
+      invoice_id: input.invoiceId,
+      amount,
+      method: input.method,
+      receipt_number: input.receiptNumber?.trim() || null,
+      paid_at: input.paidAt ?? null,
+      reference: input.reference?.trim() || null,
+      notes: input.notes?.trim() || null,
+      installment_id: input.installmentId ?? null,
+    },
+  })
+
+  if (error) throw toInvoicingError(error)
+
+  const payload = data as { invoice?: Invoice } | null
+  const row = payload?.invoice
+
+  if (!row) {
+    throw new Error('El cobro se registró pero no se recibió la factura. Recargá la lista.')
+  }
+
+  return normalizeInvoice(row)
+}
+
+/** Cuotas de una factura, ordenadas por número. */
+export async function fetchInvoiceInstallments(
+  invoiceId: string,
+): Promise<InvoiceInstallment[]> {
+  const { data, error } = await supabase
+    .from('invoice_installments')
+    .select(INSTALLMENT_SELECT)
+    .eq('invoice_id', invoiceId)
+    .order('number', { ascending: true })
+
+  if (error) throw toInvoicingError(error)
+
+  return asArray<InvoiceInstallment>(data).map(normalizeInstallment)
+}
+
+/** Cobros aplicados a una factura (`invoice_payment_allocations`). */
+export async function fetchInvoiceAllocations(
+  invoiceId: string,
+): Promise<InvoicePaymentAllocation[]> {
+  const { data, error } = await supabase
+    .from('invoice_payment_allocations')
+    .select(PAYMENT_ALLOCATION_SELECT)
+    .eq('invoice_id', invoiceId)
+    .order('created_at', { ascending: true })
+
+  if (error) throw toInvoicingError(error)
+
+  return asArray<InvoicePaymentAllocation>(data)
+}
+
+/**
+ * Estado de facturación de un cobro (`public.transaction_invoicing`).
+ *
+ * `available_amount` es lo que queda del cobro para imputar a una factura: la
+ * caja lo usa para no facturar dos veces el mismo dinero.
+ */
+export type TransactionInvoicing = {
+  transaction_id: string
+  patient_id: string
+  type: TransactionType
+  status: TransactionStatus
+  amount: number
+  invoiced_amount: number
+  available_amount: number
+  invoice_count: number
+  invoice_numbers: string[]
+}
+
+const TRANSACTION_INVOICING_SELECT = [
+  'transaction_id',
+  'patient_id',
+  'type',
+  'status',
+  'amount',
+  'invoiced_amount',
+  'available_amount',
+  'invoice_count',
+  'invoice_numbers',
+].join(', ')
+
+/** Estado de facturación de los cobros indicados (vacío si no hay ninguno). */
+export async function fetchTransactionInvoicing(
+  transactionIds: string[],
+): Promise<TransactionInvoicing[]> {
+  const ids = [...new Set(transactionIds)].filter(Boolean).slice(0, INVOICES_LIMIT)
+
+  if (ids.length === 0) return []
+
+  const { data, error } = await supabase
+    .from('transaction_invoicing')
+    .select(TRANSACTION_INVOICING_SELECT)
+    .in('transaction_id', ids)
+
+  if (error) throw toInvoicingError(error)
+
+  return asArray<TransactionInvoicing>(data).map((row) => ({
+    ...row,
+    amount: toNumber(row.amount),
+    invoiced_amount: toNumber(row.invoiced_amount),
+    available_amount: toNumber(row.available_amount),
+    invoice_count: toNumber(row.invoice_count),
+    invoice_numbers: row.invoice_numbers ?? [],
+  }))
+}
+
+/** Reemplaza el plan de cuotas de una factura ya emitida (`plan_invoice_installments`). */
+export async function planInvoiceInstallments(
+  invoiceId: string,
+  plan: InstallmentDraft[],
+): Promise<InvoiceInstallment[]> {
+  if (!invoiceId) throw new Error('Elegí la factura a la que se le asigna el plan.')
+  if (plan.length === 0) throw new Error('El plan necesita al menos una cuota.')
+
+  const { data, error } = await supabase.rpc('plan_invoice_installments', {
+    p_invoice_id: invoiceId,
+    p_installments: plan.map((item) => ({
+      number: item.number,
+      due_date: item.due_date,
+      amount: Math.round(item.amount),
+    })),
+  })
+
+  if (error) throw toInvoicingError(error)
+
+  return asArray<InvoiceInstallment>(data)
+    .map(normalizeInstallment)
+    .sort((left, right) => left.number - right.number)
 }
 
 

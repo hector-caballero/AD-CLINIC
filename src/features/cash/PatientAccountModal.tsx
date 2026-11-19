@@ -1,6 +1,7 @@
 import { AlertCircle, HandCoins, Loader2, RefreshCw } from 'lucide-react'
 import { Modal } from '../../components/ui/Modal'
 import { formatPhonePY, formatPYG } from '../../lib/format'
+import { InvoicingBadge } from './InvoicingBadge'
 import { formatMovementDate, formatMovementTime } from './cash-dates'
 import { BALANCE_STATE_META, formatSignedAmount, getBalanceState } from './cash-format'
 import {
@@ -9,6 +10,7 @@ import {
   getMovementConcept,
   type PatientBalance,
 } from './cash-types'
+import { useCashInvoicing } from './useCashInvoicing'
 import { usePatientAccount } from './usePatientAccount'
 
 type PatientAccountModalProps = {
@@ -33,6 +35,7 @@ export function PatientAccountModal({
     patientId,
     initialBalance,
   )
+  const { invoicing } = useCashInvoicing(movements)
 
   const state = getBalanceState(balance?.balance ?? 0)
   const meta = BALANCE_STATE_META[state]
@@ -208,6 +211,13 @@ export function PatientAccountModal({
                     >
                       {status.label}
                     </span>
+                    {movement.type === 'payment' && movement.status === 'paid' && (
+                      <InvoicingBadge
+                        invoicing={invoicing.get(movement.id)}
+                        showAvailable
+                        className="mt-1 ml-1"
+                      />
+                    )}
                   </li>
                 )
               })}

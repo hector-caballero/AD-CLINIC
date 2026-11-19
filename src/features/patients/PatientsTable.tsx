@@ -1,6 +1,11 @@
 import { ClipboardList, Mail, Pencil, ShieldAlert, Trash2 } from 'lucide-react'
 import { formatPatientDocument, formatPhonePY, getInitials } from '../../lib/format'
-import { getPatientFullName, type Patient, type PatientStatus } from './patient-types'
+import {
+  getPatientBillingName,
+  getPatientFullName,
+  type Patient,
+  type PatientStatus,
+} from './patient-types'
 
 const STATUS_STYLES: Record<PatientStatus, { label: string; className: string }> = {
   active: { label: 'Activo', className: 'bg-emerald-50 text-emerald-700 ring-emerald-200' },
@@ -112,6 +117,14 @@ export function PatientsTable({
                       <PatientAvatar patient={patient} />
                       <div className="min-w-0">
                         <p className="truncate text-sm font-medium text-slate-900">{fullName}</p>
+                        {getPatientBillingName(patient) !== fullName ? (
+                          <p
+                            title={patient.legal_name ?? ''}
+                            className="mt-0.5 max-w-56 truncate text-xs font-medium text-slate-600"
+                          >
+                            {patient.legal_name}
+                          </p>
+                        ) : null}
                         <p className="mt-0.5 truncate text-xs text-slate-400">
                           {patient.email ?? 'Sin email'}
                         </p>
@@ -186,6 +199,11 @@ export function PatientsTable({
                     <p className="mt-0.5 text-xs text-slate-500">
                       {formatPatientDocument(patient.document_type, patient.document_number)}
                     </p>
+                    {getPatientBillingName(patient) !== fullName ? (
+                      <p className="mt-0.5 truncate text-xs font-medium text-slate-600">
+                        {patient.legal_name}
+                      </p>
+                    ) : null}
                   </div>
                   <PatientStatusBadge status={patient.status} />
                 </div>

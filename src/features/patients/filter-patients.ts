@@ -42,6 +42,7 @@ export function filterPatients(patients: Patient[], filters: PatientSearchFilter
     const fullName = normalizeSearchText(`${patient.first_name} ${patient.last_name}`)
 
     if (fullName.includes(query)) return true
+    if (normalizeSearchText(patient.legal_name ?? '').includes(query)) return true
     if (normalizeSearchText(patient.email ?? '').includes(query)) return true
     if (normalizeSearchText(patient.document_number ?? '').includes(query)) return true
 

@@ -1,11 +1,15 @@
-import type { ParaguayDocumentType } from '../../lib/format'
+import { resolveDocumentType, type ParaguayDocumentType } from '../../lib/format'
 
 /**
  * Tipos del módulo de pacientes.
  *
  * La base de datos guarda los documentos sin puntos ni guiones
- * (`1234567`, `800123456`) y el tipo con los valores `CI`, `RUC` o
- * `Pasaporte`. El formato visual se aplica solo en la interfaz.
+ * (`1234567`, `38706334`) y el tipo con los valores `CI`, `RUC` o
+ * `Pasaporte`. El formato visual se aplica solo en la interfaz: la C.I. se
+ * muestra con puntos y el RUC con su guion (`3870633-4`).
+ *
+ * `legal_name` es la razón social del contribuyente: se completa desde Tu RUC y
+ * es la que se imprime como «Razón social» cuando el paciente factura con RUC.
  */
 
 export const DOCUMENT_TYPE_OPTIONS: {
@@ -13,8 +17,8 @@ export const DOCUMENT_TYPE_OPTIONS: {
   label: string
   hint: string
 }[] = [
-  { value: 'CI', label: 'Cédula de Identidad', hint: '1.234.567' },
-  { value: 'RUC', label: 'RUC', hint: '80012345-6' },
+  { value: 'CI', label: 'Cédula de Identidad', hint: '1.234.567 · solo números, sin DV' },
+  { value: 'RUC', label: 'RUC', hint: '3870633-4 · con dígito verificador' },
   { value: 'Pasaporte', label: 'Pasaporte', hint: 'AB123456' },
 ]
 
@@ -29,6 +33,8 @@ export type Patient = {
   last_name: string
   document_type: ParaguayDocumentType | string
   document_number: string | null
+  /** Razón social del contribuyente (`null` en personas sin RUC). */
+  legal_name: string | null
   birth_date: string | null
   phone: string
   phone_alt: string | null
@@ -52,6 +58,7 @@ export type PatientInput = {
   last_name: string
   document_type: ParaguayDocumentType
   document_number: string | null
+  legal_name: string | null
   birth_date: string | null
   phone: string
   phone_alt: string | null
@@ -71,6 +78,7 @@ export type PatientFormValues = {
   last_name: string
   document_type: ParaguayDocumentType
   document_number: string
+  legal_name: string
   birth_date: string
   phone: string
   phone_alt: string
@@ -90,6 +98,7 @@ export const PATIENT_SELECT = [
   'last_name',
   'document_type',
   'document_number',
+  'legal_name',
   'birth_date',
   'phone',
   'phone_alt',
@@ -111,6 +120,18 @@ export function getPatientFullName(
   patient: Pick<Patient, 'first_name' | 'last_name'>,
 ): string {
   return `${patient.first_name} ${patient.last_name}`.replace(/\s+/g, ' ').trim()
+}
+
+/**
+ * Nombre que se imprime en la factura: la razón social del contribuyente cuando
+ * la ficha tiene RUC y, si no, el nombre y apellido.
+ */
+export function getPatientBillingName(
+  patient: Pick<Patient, 'first_name' | 'last_name' | 'legal_name' | 'document_type'>,
+): string {
+  const isTaxpayer = resolveDocumentType(patient.document_type) === 'RUC'
+
+  return (isTaxpayer ? patient.legal_name?.trim() : '') || getPatientFullName(patient)
 }
 
 /** Orden alfabético usado en el listado y al insertar un paciente nuevo. */

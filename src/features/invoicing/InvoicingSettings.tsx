@@ -29,6 +29,7 @@ import {
   TIMBRADO_MODE_LABELS,
   getIssuerName,
   getIssuerTimbrados,
+  getOccasionalCustomer,
   getTimbradoRangeLabel,
   isTimbradoExhausted,
   isTimbradoExpired,
@@ -89,6 +90,12 @@ function ClinicModeForm({
   const [address, setAddress] = useState(settings?.address ?? '')
   const [phone, setPhone] = useState(settings?.phone ? formatPhonePY(settings.phone) : '')
   const [email, setEmail] = useState(settings?.email ?? '')
+  const [occasionalName, setOccasionalName] = useState(
+    () => getOccasionalCustomer(settings).name,
+  )
+  const [occasionalRuc, setOccasionalRuc] = useState(
+    () => getOccasionalCustomer(settings).ruc,
+  )
 
   const [isSaving, setIsSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -118,6 +125,8 @@ function ClinicModeForm({
       address: address.trim() || null,
       phone: phone.replace(/\D+/g, '') || null,
       email: email.trim() || null,
+      occasional_customer_name: occasionalName.trim() || null,
+      occasional_customer_ruc: occasionalRuc.trim() || null,
     }
 
     try {
@@ -279,6 +288,51 @@ function ClinicModeForm({
           />
         </div>
       </div>
+
+      <fieldset className="space-y-3 rounded-xl border border-slate-200 bg-slate-50/60 p-3">
+        <legend className="px-1 text-xs font-semibold uppercase tracking-wider text-slate-500">
+          Cliente ocasional (consumidor final)
+        </legend>
+
+        <div className="grid gap-3 sm:grid-cols-2">
+          <div>
+            <label htmlFor="clinic-occasional-name" className={LABEL_CLASS}>
+              Nombre / razón social
+            </label>
+            <input
+              id="clinic-occasional-name"
+              type="text"
+              value={occasionalName}
+              onChange={(event) => setOccasionalName(event.target.value.toUpperCase())}
+              disabled={isSaving}
+              maxLength={160}
+              placeholder="CLIENTE OCASIONAL"
+              className={INPUT_CLASS}
+            />
+          </div>
+
+          <div>
+            <label htmlFor="clinic-occasional-ruc" className={LABEL_CLASS}>
+              RUC genérico
+            </label>
+            <input
+              id="clinic-occasional-ruc"
+              type="text"
+              value={occasionalRuc}
+              onChange={(event) => setOccasionalRuc(event.target.value.trim())}
+              disabled={isSaving}
+              maxLength={12}
+              placeholder="44444401-7"
+              className={`${INPUT_CLASS} font-mono`}
+            />
+          </div>
+        </div>
+
+        <p className={HELP_CLASS}>
+          Se cargan con un clic desde «Cliente ocasional» al emitir la factura. La DNIT usa el RUC
+          genérico 44444401-7; si el contador prefiere otro valor (por ejemplo «X»), se cambia acá.
+        </p>
+      </fieldset>
 
       {notice && (
         <p

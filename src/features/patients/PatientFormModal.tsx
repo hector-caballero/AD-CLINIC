@@ -12,6 +12,8 @@ import {
   resolveDocumentType,
   type ParaguayDocumentType,
 } from '../../lib/format'
+import { autoFormatRuc, RUC_FORMAT_HINT } from '../invoicing/invoicing-format'
+import { RucLookupField } from '../invoicing/RucLookupField'
 import { createPatient, updatePatient } from './patients-service'
 import {
   DOCUMENT_TYPE_OPTIONS,
@@ -23,11 +25,19 @@ import {
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
+/** Mensajes de validación por tipo de documento (C.I. sin DV, RUC con DV). */
+const DOCUMENT_ERROR_MESSAGES: Record<ParaguayDocumentType, string> = {
+  CI: 'La C.I. debe tener entre 5 y 8 dígitos, sin dígito verificador.',
+  RUC: `El RUC debe respetar el formato ${RUC_FORMAT_HINT}.`,
+  Pasaporte: 'El pasaporte debe tener entre 6 y 12 letras o números.',
+}
+
 const EMPTY_FORM: PatientFormValues = {
   first_name: '',
   last_name: '',
   document_type: 'CI',
   document_number: '',
+  legal_name: '',
   birth_date: '',
   phone: '',
   phone_alt: '',
@@ -75,12 +85,18 @@ function toFormValues(patient: Patient | null): PatientFormValues {
   if (!patient) return EMPTY_FORM
 
   const documentType = resolveDocumentType(patient.document_type)
+  const rawDocument = patient.document_number ?? ''
 
   return {
     first_name: patient.first_name,
     last_name: patient.last_name,
     document_type: documentType,
-    document_number: formatDocumentNumber(patient.document_number ?? '', documentType),
+    // El RUC se muestra con su guion (3870633-4); la C.I. con puntos.
+    document_number:
+      documentType === 'RUC'
+        ? autoFormatRuc(rawDocument)
+        : formatDocumentNumber(rawDocument, documentType),
+    legal_name: patient.legal_name ?? '',
     birth_date: patient.birth_date?.slice(0, 10) ?? '',
     phone: formatPhonePY(patient.phone),
     phone_alt: patient.phone_alt ? formatPhonePY(patient.phone_alt) : '',
@@ -109,6 +125,7 @@ function toPatientInput(values: PatientFormValues): PatientInput {
     document_number: values.document_number
       ? normalizeDocumentNumber(values.document_number, values.document_type)
       : null,
+    legal_name: emptyToNull(values.legal_name),
     birth_date: values.birth_date || null,
     phone: normalizePhone(values.phone),
     phone_alt: values.phone_alt ? normalizePhone(values.phone_alt) : null,
@@ -149,12 +166,7 @@ function validate(values: PatientFormValues, today: string): FormErrors {
     values.document_number.trim() &&
     !isValidDocumentNumber(values.document_number, values.document_type)
   ) {
-    errors.document_number =
-      values.document_type === 'CI'
-        ? 'La C.I. debe tener entre 5 y 8 dígitos.'
-        : values.document_type === 'RUC'
-          ? 'El RUC debe tener 7, 8 o 9 dígitos (base + verificador).'
-          : 'El pasaporte debe tener entre 6 y 12 letras o números.'
+    errors.document_number = DOCUMENT_ERROR_MESSAGES[values.document_type]
   }
 
   if (values.email.trim() && !EMAIL_PATTERN.test(values.email.trim())) {
@@ -233,6 +245,8 @@ export function PatientFormModal({ patient, onClose, onSaved }: PatientFormModal
   const activeDocumentOption =
     DOCUMENT_TYPE_OPTIONS.find((option) => option.value === values.document_type) ??
     DOCUMENT_TYPE_OPTIONS[0]
+  const isRuc = values.document_type === 'RUC'
+  const isCi = values.document_type === 'CI'
 
   function clearError(field: keyof PatientFormValues) {
     setErrors((current) => {
@@ -254,7 +268,12 @@ export function PatientFormModal({ patient, onClose, onSaved }: PatientFormModal
     setValues((current) => ({
       ...current,
       document_type: type,
-      document_number: formatDocumentNumber(current.document_number, type),
+      document_number:
+        type === 'RUC'
+          ? autoFormatRuc(current.document_number)
+          : formatDocumentNumber(current.document_number, type),
+      // La razón social solo aplica a contribuyentes con RUC.
+      legal_name: type === 'RUC' ? current.legal_name : '',
     }))
     clearError('document_number')
   }
@@ -385,35 +404,56 @@ export function PatientFormModal({ patient, onClose, onSaved }: PatientFormModal
               </select>
             </Field>
 
-            <Field
-              id="patient-document_number"
-              label="Número de documento"
-              error={errors.document_number}
-              hint={`Formato: ${activeDocumentOption.hint}`}
-            >
-              <input
+            {isRuc ? (
+              <RucLookupField
                 id="patient-document_number"
-                type="text"
+                label="RUC (contribuyente)"
                 value={values.document_number}
-                onChange={(event) =>
-                  setField(
-                    'document_number',
-                    formatDocumentNumber(event.target.value, values.document_type),
+                onChange={(next) => setField('document_number', next)}
+                onResolved={(found) => {
+                  // La razón social se completa sola; los nombres de la ficha no se tocan.
+                  setValues((current) =>
+                    current.legal_name.trim()
+                      ? current
+                      : { ...current, legal_name: found.name },
                   )
-                }
-                inputMode={values.document_type === 'Pasaporte' ? 'text' : 'numeric'}
-                autoComplete="off"
-                placeholder={activeDocumentOption.hint}
-                maxLength={15}
-                aria-invalid={Boolean(errors.document_number)}
-                aria-describedby={
-                  errors.document_number
-                    ? 'patient-document_number-error'
-                    : 'patient-document_number-hint'
-                }
-                className={inputClass(Boolean(errors.document_number))}
+                }}
+                disabled={isSaving}
+                placeholder="3870633-4"
+                error={errors.document_number}
+                helpText={`Formato: ${activeDocumentOption.hint}. La lupa consulta la DNIT y completa la razón social.`}
               />
-            </Field>
+            ) : (
+              <Field
+                id="patient-document_number"
+                label={isCi ? 'Cédula de Identidad (C.I.)' : 'Número de pasaporte'}
+                error={errors.document_number}
+                hint={`Formato: ${activeDocumentOption.hint}`}
+              >
+                <input
+                  id="patient-document_number"
+                  type="text"
+                  value={values.document_number}
+                  onChange={(event) =>
+                    setField(
+                      'document_number',
+                      formatDocumentNumber(event.target.value, values.document_type),
+                    )
+                  }
+                  inputMode={isCi ? 'numeric' : 'text'}
+                  autoComplete="off"
+                  placeholder={activeDocumentOption.hint}
+                  maxLength={12}
+                  aria-invalid={Boolean(errors.document_number)}
+                  aria-describedby={
+                    errors.document_number
+                      ? 'patient-document_number-error'
+                      : 'patient-document_number-hint'
+                  }
+                  className={inputClass(Boolean(errors.document_number))}
+                />
+              </Field>
+            )}
 
             <Field id="patient-first_name" label="Nombres" required error={errors.first_name}>
               <input
@@ -444,6 +484,26 @@ export function PatientFormModal({ patient, onClose, onSaved }: PatientFormModal
                 className={inputClass(Boolean(errors.last_name))}
               />
             </Field>
+
+            {isRuc ? (
+              <Field
+                id="patient-legal_name"
+                label="Razón social (DNIT)"
+                hint="Se imprime como razón social al facturar. La completa la consulta a Tu RUC."
+                className="sm:col-span-2"
+              >
+                <input
+                  id="patient-legal_name"
+                  type="text"
+                  value={values.legal_name}
+                  onChange={(event) => setField('legal_name', event.target.value)}
+                  autoComplete="organization"
+                  maxLength={160}
+                  placeholder="CABALLERO MERCADO, HECTOR FABIAN"
+                  className={inputClass(false)}
+                />
+              </Field>
+            ) : null}
 
             <Field id="patient-birth_date" label="Fecha de nacimiento" error={errors.birth_date}>
               <input
