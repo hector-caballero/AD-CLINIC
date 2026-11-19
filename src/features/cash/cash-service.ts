@@ -19,6 +19,8 @@ import {
   type PaymentRecord,
   type TreatmentCatalogItem,
   type TreatmentChargeInput,
+  type TransactionStatus,
+  type TransactionType,
   type TreatmentStatus,
 } from './cash-types'
 
@@ -41,6 +43,9 @@ export const CASH_MOVEMENTS_LIMIT = 500
 
 /** Tope de movimientos del estado de cuenta de un paciente. */
 export const PATIENT_ACCOUNT_MOVEMENTS_LIMIT = 200
+
+/** Tope de cargos y pagos usados por el resumen del plan de tratamiento. */
+export const PATIENT_PLAN_TRANSACTIONS_LIMIT = 500
 
 /** Tope de filas de la vista de saldos (coincide con `db-max-rows`). */
 export const BALANCES_LIMIT = 1000
@@ -186,6 +191,55 @@ export async function fetchPatientAccount(patientId: string): Promise<{
       : null,
     movements,
   }
+}
+
+/** Cobro o cargo del paciente con el tratamiento al que se enlazó. */
+export type PatientTransactionLink = {
+  id: string
+  type: TransactionType
+  status: TransactionStatus
+  /** `patient_treatments.id` cuando el movimiento cobra un procedimiento. */
+  patient_treatment_id: string | null
+  amount: number
+  paid_at: string | null
+}
+
+/**
+ * Cargos y pagos del paciente, de los más viejos a los más nuevos.
+ *
+ * El odontograma los cruza con `transaction_invoicing` para saber qué líneas
+ * del plan están cobradas y qué cobros todavía pueden imputarse a una factura.
+ */
+export async function fetchPatientTransactionLinks(
+  patientId: string,
+): Promise<PatientTransactionLink[]> {
+  const { data, error } = await supabase
+    .from('transactions')
+    .select('id, type, status, patient_treatment_id, amount, paid_at')
+    .eq('patient_id', patientId)
+    .in('type', ['charge', 'payment'])
+    .order('created_at', { ascending: true })
+    .limit(PATIENT_PLAN_TRANSACTIONS_LIMIT)
+
+  if (error) throw toCashError(error)
+
+  return (
+    (data ?? []) as {
+      id: string
+      type: TransactionType
+      status: TransactionStatus
+      patient_treatment_id: string | null
+      amount: unknown
+      paid_at: string | null
+    }[]
+  ).map((row) => ({
+    id: row.id,
+    type: row.type,
+    status: row.status,
+    patient_treatment_id: row.patient_treatment_id,
+    amount: toNumber(row.amount),
+    paid_at: row.paid_at,
+  }))
 }
 
 /** Catálogo activo, ordenado por categoría y nombre. */

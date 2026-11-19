@@ -242,7 +242,7 @@ src/
 │  ├─ RequireAuth.tsx         guard de rutas privadas
 │  └─ RequireAdmin.tsx        guard de rutas solo para administración
 ├─ features/treatments/       catálogo: servicio, hook, toolbar, tabla, modal
-├─ features/odontogram/       odontograma SVG, servicio de ítems, presupuesto, dictado por voz y cobro del plan
+├─ features/odontogram/       odontograma SVG, servicio de ítems, presupuesto, estado de cobro y facturación, dictado por voz y cobro del plan
 ├─ features/team/             equipo: servicio, hook, toolbar, tabla y modales + directorio (`staff_directory`)
 ├─ features/tv/               pantalla de sala: cola derivada, servicio, Realtime, anuncios y componentes
 ├─ components/
@@ -357,10 +357,20 @@ Se abre con el buscador de pacientes o por enlace directo: `/odontograma?pacient
   puede dejar el cargo a cuenta. La nota del movimiento resume el plan
   (`Plan odontograma: Pieza 16 oclusal · Obturación; …`).
 - **Sin doble cobro:** cada línea cobrada guarda `patient_treatment_id`, pasa a `completed` con
-  `performed_at` y sale de la selección (badge «En caja» en el panel). Esas líneas ya no cambian de
+  `performed_at` y sale de la selección (el panel la marca «Cobrado» si el cargo está pagado o
+  «Sin cobrar» si quedó a cuenta). Esas líneas ya no cambian de
   estado ni se borran desde el odontograma: el ajuste se hace desde `/caja`. Si el cobro se registra
   pero falla el enlace, la página recarga el odontograma y pide revisar la caja antes de reintentar;
   si un movimiento se borra en la base, la línea clínica se conserva (`on delete set null`).
+- **Estado de cobro y facturación:** el panel cruza el plan con las facturas emitidas del paciente
+  (`fetchPatientInvoices`) y con sus cargos y pagos de caja (`fetchPatientTransactionLinks` más
+  `transaction_invoicing`) y resume **Cobrado**, **Falta por cobrar** (o **Saldado** en verde) y
+  **Sin facturar / Facturado parcial / Facturado** con los números de comprobante. El cálculo vive
+  en `odontogram-financials.ts` (`buildPlanFinancials`) y el hook `usePlanFinancials` lo recalcula
+  en vivo al cobrar o emitir. «Facturar» propone el importe pendiente de facturar y, si el paciente
+  ya pagó en caja, imputa esos cobros como `payment_allocations`: la factura nace enlazada a sus
+  ingresos (sin duplicarlos) y el resumen se refresca al emitir. Un cobro imputado a una factura se
+  cuenta una sola vez porque `paid_amount` no se suma aparte de los pagos de caja.
 - **RLS:** cualquier integrante con perfil activo puede leer el odontograma (recepción lo usa
   para cotizar), pero solo `dentist` y `admin` insertan, actualizan o borran
   (`can_manage_odontograms()`); la UI oculta las acciones de escritura para el resto.

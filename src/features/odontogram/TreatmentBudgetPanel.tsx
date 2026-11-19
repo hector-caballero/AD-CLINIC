@@ -17,7 +17,6 @@ import {
   STATUS_ORDER,
   computeOdontogramTotals,
   getChargeableItems,
-  getItemAmount,
   getItemLabel,
   getSurfaceLabel,
   isBilledItem,
@@ -25,12 +24,33 @@ import {
   type OdontogramItem,
   type OdontogramItemStatus,
 } from './odontogram-types'
+import type { PlanFinancialSummary, PlanItemFinancialState } from './odontogram-financials'
 
 const ACTION_CLASS =
   'inline-flex items-center gap-1 rounded-lg border px-2 py-1 text-[11px] font-medium transition-colors disabled:cursor-wait disabled:opacity-60'
 
+/** Estado de facturación del plan completo. */
+type PlanBillingState = 'none' | 'partial' | 'full'
+
+const BILLING_STATE_META: Record<PlanBillingState, { label: string; badge: string }> = {
+  none: {
+    label: 'Sin facturar',
+    badge: 'bg-slate-100 text-slate-600 ring-slate-200',
+  },
+  partial: {
+    label: 'Facturado parcial',
+    badge: 'bg-sky-50 text-sky-700 ring-sky-200',
+  },
+  full: {
+    label: 'Facturado',
+    badge: 'bg-emerald-50 text-emerald-700 ring-emerald-200',
+  },
+}
+
 type BudgetItemRowProps = {
   item: OdontogramItem
+  /** Estado de cobro y facturación de la línea (nulo mientras carga). */
+  financial: PlanItemFinancialState | null
   isBusy: boolean
   readOnly: boolean
   onChangeStatus: (item: OdontogramItem, status: OdontogramItemStatus) => void
@@ -40,6 +60,7 @@ type BudgetItemRowProps = {
 /** Una línea del plan: pieza, cara, procedimiento y acciones de estado. */
 function BudgetItemRow({
   item,
+  financial,
   isBusy,
   readOnly,
   onChangeStatus,
@@ -53,7 +74,7 @@ function BudgetItemRow({
     <li className="px-4 py-3 sm:px-5">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <div className="flex items-center gap-1.5">
+          <div className="flex flex-wrap items-center gap-1.5">
             <span className="rounded-md bg-slate-100 px-1.5 py-0.5 font-mono text-[11px] font-semibold text-slate-700">
               {item.tooth_number}
             </span>
@@ -66,7 +87,44 @@ function BudgetItemRow({
               <span className={`size-1.5 rounded-full ${meta.dot}`} aria-hidden="true" />
               {meta.label}
             </span>
-            {isBilled && (
+            {!isAbsent && financial && (
+              <span
+                title={
+                  financial.isPaid
+                    ? 'Cobrado en caja'
+                    : isBilled
+                      ? 'Cargado en caja, todavía sin pago'
+                      : 'Todavía sin movimiento de caja'
+                }
+                className={[
+                  'inline-flex shrink-0 items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-medium ring-1',
+                  financial.isPaid
+                    ? 'bg-emerald-50 text-emerald-700 ring-emerald-200'
+                    : isBilled
+                      ? 'bg-amber-50 text-amber-800 ring-amber-200'
+                      : 'bg-slate-100 text-slate-600 ring-slate-200',
+                ].join(' ')}
+              >
+                <Banknote className="size-2.5" aria-hidden="true" />
+                {financial.isPaid ? 'Cobrado' : 'Sin cobrar'}
+              </span>
+            )}
+
+            {!isAbsent && financial?.isInvoiced && (
+              <span
+                title={
+                  financial.invoiceNumbers.length > 0
+                    ? `Facturas: ${financial.invoiceNumbers.join(', ')}`
+                    : 'Respaldado por una factura emitida'
+                }
+                className="inline-flex shrink-0 items-center gap-1 rounded-full bg-sky-50 px-1.5 py-0.5 text-[10px] font-medium text-sky-700 ring-1 ring-sky-200"
+              >
+                <Receipt className="size-2.5" aria-hidden="true" />
+                Facturado
+              </span>
+            )}
+
+            {!isAbsent && !financial && isBilled && (
               <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-teal-50 px-1.5 py-0.5 text-[10px] font-medium text-teal-700 ring-1 ring-teal-200">
                 <Receipt className="size-2.5" aria-hidden="true" />
                 En caja
@@ -204,6 +262,13 @@ export type TreatmentBudgetPanelProps = {
   onChargePlan: () => void
   /** Abre la emisión de factura con el importe del plan sin cobrar. */
   onInvoicePlan: () => void
+  /** Estado de cobro y facturación del plan (se recalcula en vivo). */
+  financials: PlanFinancialSummary
+  isFinancialLoading: boolean
+  /** `true` cuando todavía no llegó la primera respuesta del paciente. */
+  hasFinancialData: boolean
+  financialError: string | null
+  onRetryFinancials: () => void
 }
 
 /**
@@ -224,11 +289,15 @@ export function TreatmentBudgetPanel({
   onRemove,
   onChargePlan,
   onInvoicePlan,
+  financials,
+  isFinancialLoading,
+  hasFinancialData,
+  financialError,
+  onRetryFinancials,
 }: TreatmentBudgetPanelProps) {
   const sorted = sortOdontogramItems(items)
   const totals = computeOdontogramTotals(sorted)
   const chargeable = getChargeableItems(sorted)
-  const chargeableTotal = chargeable.reduce((sum, item) => sum + getItemAmount(item), 0)
   const billedCount = sorted.filter(isBilledItem).length
   const groups = STATUS_ORDER.map((status) => ({
     status,
@@ -252,6 +321,27 @@ export function TreatmentBudgetPanel({
   for (const group of groups) counts[group.status] = group.items.length
 
   const dentitionLabel = dentition === 'permanent' ? 'Dentición permanente' : 'Dentición temporal'
+
+  const billingState: PlanBillingState =
+    financials.invoiceCount === 0 ? 'none' : financials.isFullyInvoiced ? 'full' : 'partial'
+  const billingMeta = BILLING_STATE_META[billingState]
+  const invoiceNumbersLabel =
+    financials.invoiceNumbers.length > 0
+      ? `${financials.invoiceNumbers.slice(0, 2).join(' · ')}${
+          financials.invoiceNumbers.length > 2
+            ? ` +${financials.invoiceNumbers.length - 2}`
+            : ''
+        }`
+      : `${financials.invoiceCount} ${financials.invoiceCount === 1 ? 'factura' : 'facturas'}`
+  const billingDetail =
+    billingState === 'none'
+      ? `Pendiente de facturar ${formatPYG(financials.unbilledAmount)}`
+      : billingState === 'partial'
+        ? `${formatPYG(financials.unbilledAmount)} sin facturar · ${invoiceNumbersLabel}`
+        : invoiceNumbersLabel
+  const isCollected = financials.remainingToCollect <= 0
+  /** Sin el estado de facturación cargado no se emite: podría duplicar una factura. */
+  const canInvoice = hasFinancialData && financials.unbilledAmount > 0
 
   return (
     <aside className="flex flex-col overflow-hidden rounded-2xl border border-slate-200/80 bg-white/85 shadow-card backdrop-blur-md">
@@ -279,6 +369,85 @@ export function TreatmentBudgetPanel({
         </p>
       </header>
 
+      <section
+        aria-label="Estado de cobro y facturación"
+        className="border-b border-slate-100 px-4 py-3 sm:px-5"
+      >
+        <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+          Estado de cobro y facturación
+        </p>
+
+        {financialError ? (
+          <div className="mt-2 flex items-start gap-2 rounded-xl bg-amber-50 px-2.5 py-2 text-[11px] leading-snug text-amber-800 ring-1 ring-amber-200">
+            <AlertCircle className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
+            <span className="min-w-0 flex-1">{financialError}</span>
+            <button
+              type="button"
+              onClick={onRetryFinancials}
+              className="shrink-0 rounded-lg border border-amber-300 bg-white/80 px-1.5 py-0.5 font-medium text-amber-900 transition-colors hover:bg-white"
+            >
+              Reintentar
+            </button>
+          </div>
+        ) : !hasFinancialData ? (
+          <p className="mt-2 flex items-center gap-1.5 text-[11px] text-slate-500">
+            <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />
+            {isFinancialLoading ? 'Consultando cobros y facturas…' : 'Sin datos de cobro todavía.'}
+          </p>
+        ) : (
+          <>
+            <div className="mt-2 grid grid-cols-2 gap-2">
+              <div className="rounded-xl border border-emerald-200 bg-emerald-50/70 px-2.5 py-2">
+                <p className="text-[10px] font-semibold uppercase tracking-wide text-emerald-700">
+                  Cobrado
+                </p>
+                <p className="mt-0.5 text-sm font-semibold tabular-nums text-emerald-800">
+                  {formatPYG(financials.collectedAmount)}
+                </p>
+              </div>
+
+              <div
+                className={[
+                  'rounded-xl border px-2.5 py-2',
+                  isCollected
+                    ? 'border-emerald-200 bg-emerald-50/70'
+                    : 'border-amber-200 bg-amber-50/70',
+                ].join(' ')}
+              >
+                <p
+                  className={[
+                    'text-[10px] font-semibold uppercase tracking-wide',
+                    isCollected ? 'text-emerald-700' : 'text-amber-700',
+                  ].join(' ')}
+                >
+                  {isCollected ? 'Saldado' : 'Falta por cobrar'}
+                </p>
+                <p
+                  className={[
+                    'mt-0.5 text-sm font-semibold tabular-nums',
+                    isCollected ? 'text-emerald-800' : 'text-amber-800',
+                  ].join(' ')}
+                >
+                  {formatPYG(financials.remainingToCollect)}
+                </p>
+              </div>
+            </div>
+
+            <div className="mt-2 flex flex-wrap items-center gap-1.5">
+              <span
+                className={`inline-flex shrink-0 items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-medium ring-1 ${billingMeta.badge}`}
+              >
+                <Receipt className="size-2.5" aria-hidden="true" />
+                {billingMeta.label}
+              </span>
+              <span className="min-w-0 text-[11px] leading-snug text-slate-500">
+                {billingDetail}
+              </span>
+            </div>
+          </>
+        )}
+      </section>
+
       <div className="grid grid-cols-3 gap-2 border-b border-slate-100 px-4 py-3 sm:px-5">
         <StatusMetric status="pending" amount={totals.pending} count={counts.pending} />
         <StatusMetric status="budgeted" amount={totals.budgeted} count={counts.budgeted} />
@@ -287,13 +456,19 @@ export function TreatmentBudgetPanel({
 
       {!readOnly && totals.items > 0 && (
         <div className="border-b border-slate-100 px-4 py-3 sm:px-5">
-          {chargeable.length > 0 ? (
+          {chargeable.length > 0 || financials.unbilledAmount > 0 ? (
             <>
               <div className="grid gap-2 sm:grid-cols-2">
                 <button
                   type="button"
                   onClick={onChargePlan}
-                  className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-brand-500 px-3 py-2.5 text-sm font-semibold text-ink-950 shadow-sm shadow-brand-500/30 ring-1 ring-brand-600/25 transition-colors hover:bg-brand-400"
+                  disabled={chargeable.length === 0}
+                  title={
+                    chargeable.length === 0
+                      ? 'Todas las líneas del plan ya están cargadas en caja.'
+                      : 'Enviar las líneas pendientes a caja'
+                  }
+                  className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-brand-500 px-3 py-2.5 text-sm font-semibold text-ink-950 shadow-sm shadow-brand-500/30 ring-1 ring-brand-600/25 transition-colors hover:bg-brand-400 disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:bg-brand-500"
                 >
                   <Banknote className="size-4" aria-hidden="true" />
                   Cobrar este plan
@@ -301,20 +476,36 @@ export function TreatmentBudgetPanel({
                 <button
                   type="button"
                   onClick={onInvoicePlan}
-                  className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-slate-300 bg-white/85 px-3 py-2.5 text-sm font-medium text-slate-700 shadow-sm transition-colors hover:bg-slate-50"
+                  disabled={!canInvoice}
+                  title={
+                    !hasFinancialData
+                      ? 'Cargando el estado de facturación del paciente…'
+                      : canInvoice
+                        ? `Facturar ${formatPYG(financials.unbilledAmount)}`
+                        : 'El plan ya está respaldado por facturas emitidas.'
+                  }
+                  className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-slate-300 bg-white/85 px-3 py-2.5 text-sm font-medium text-slate-700 shadow-sm transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:bg-white/85"
                 >
                   <FileText className="size-4" aria-hidden="true" />
                   Facturar
                 </button>
               </div>
               <p className="mt-1.5 text-center text-[11px] text-slate-500">
-                {chargeable.length} {chargeable.length === 1 ? 'línea' : 'líneas'} sin cobrar ·{' '}
-                {formatPYG(chargeableTotal)}
+                {chargeable.length > 0 &&
+                  `${chargeable.length} ${chargeable.length === 1 ? 'línea' : 'líneas'} sin cobrar · `}
+                {financials.remainingToCollect > 0
+                  ? `Falta por cobrar ${formatPYG(financials.remainingToCollect)}`
+                  : 'Todo el plan está cobrado'}
               </p>
+              {financials.unbilledAmount > 0 && (
+                <p className="text-center text-[11px] text-slate-400">
+                  Pendiente de facturar {formatPYG(financials.unbilledAmount)}
+                </p>
+              )}
             </>
           ) : billedCount > 0 ? (
             <p className="rounded-xl bg-teal-50 px-3 py-2 text-center text-[11px] font-medium text-teal-700 ring-1 ring-teal-200">
-              Todo el plan está cobrado en caja.
+              Todo el plan está cobrado y facturado.
             </p>
           ) : null}
         </div>
@@ -374,6 +565,7 @@ export function TreatmentBudgetPanel({
                     <BudgetItemRow
                       key={item.id}
                       item={item}
+                      financial={financials.items.get(item.id) ?? null}
                       isBusy={busyItemId === item.id}
                       readOnly={readOnly}
                       onChangeStatus={onChangeStatus}
@@ -390,7 +582,8 @@ export function TreatmentBudgetPanel({
       <footer className="border-t border-slate-100 bg-slate-50/60 px-4 py-3 text-[11px] leading-relaxed text-slate-500 sm:px-5">
         El total suma los procedimientos pendientes, presupuestados y realizados; las piezas
         ausentes no agregan importe. Cada precio queda congelado en guaraníes al guardar la línea.
-        Las líneas cobradas quedan enlazadas a su movimiento de caja.
+        «Cobrado» suma los pagos confirmados del paciente en caja y «Facturado», las facturas
+        emitidas: un cobro imputado a una factura se cuenta una sola vez.
       </footer>
     </aside>
   )

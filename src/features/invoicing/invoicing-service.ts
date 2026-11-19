@@ -438,6 +438,29 @@ export async function fetchInvoices(limit = INVOICES_LIMIT): Promise<Invoice[]> 
   return asArray<Invoice>(data).map(normalizeInvoice)
 }
 
+/**
+ * Facturas emitidas de un paciente, de la más nueva a la más vieja.
+ *
+ * La usa el odontograma para mostrar el importe ya respaldado por comprobantes
+ * y los números de factura del plan de tratamiento.
+ */
+export async function fetchPatientInvoices(
+  patientId: string,
+  limit = INVOICES_LIMIT,
+): Promise<Invoice[]> {
+  const { data, error } = await supabase
+    .from('invoices')
+    .select(INVOICE_SELECT)
+    .eq('patient_id', patientId)
+    .eq('status', 'issued')
+    .order('issued_at', { ascending: false })
+    .limit(limit)
+
+  if (error) throw toInvoicingError(error)
+
+  return asArray<Invoice>(data).map(normalizeInvoice)
+}
+
 export type IssueInvoiceInput = {
   timbradoId: string
   /**

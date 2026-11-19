@@ -18,8 +18,6 @@ import type { BilledItemLink } from '../features/odontogram/odontogram-service'
 import { DENTITION_OPTIONS } from '../features/odontogram/odontogram-teeth'
 import {
   ITEM_STATUS_META,
-  getChargeableItems,
-  getItemAmount,
   getItemLabel,
   isAbsentTooth,
   type Dentition,
@@ -30,6 +28,8 @@ import {
   type ToothSurface,
 } from '../features/odontogram/odontogram-types'
 import { useOdontogram } from '../features/odontogram/useOdontogram'
+import { buildPlanInvoiceDraft } from '../features/odontogram/odontogram-financials'
+import { usePlanFinancials } from '../features/odontogram/usePlanFinancials'
 import { InvoiceFormModal, type InvoiceSeed } from '../features/invoicing/InvoiceFormModal'
 import { getInitials, formatPYG } from '../lib/format'
 
@@ -76,6 +76,7 @@ export default function OdontogramPage() {
   )
 
   const odontogram = useOdontogram(patient?.id ?? null, dentition)
+  const financials = usePlanFinancials(patient?.id ?? null, odontogram.items)
 
   function selectPatient(next: Patient) {
     setSearchParams({ paciente: next.id })
@@ -229,6 +230,7 @@ export default function OdontogramPage() {
       await odontogram.markBilled(links)
     } catch {
       await odontogram.reload()
+      financials.reload()
       setIsChargingPlan(false)
       setNotice({
         tone: 'error',
@@ -239,6 +241,7 @@ export default function OdontogramPage() {
     }
 
     setIsChargingPlan(false)
+    financials.reload()
     setNotice({
       tone: 'success',
       message: submission.collected
@@ -250,11 +253,41 @@ export default function OdontogramPage() {
   const patientName = patient ? getPatientFullName(patient) : ''
   const selectionIsAbsent = selection ? isAbsentTooth(odontogram.items, selection.toothNumber) : false
 
-  /** Importe del plan que todavía no se cobró: es el que se propone al facturar. */
-  const chargeableTotal = useMemo(
-    () => getChargeableItems(odontogram.items).reduce((sum, item) => sum + getItemAmount(item), 0),
-    [odontogram.items],
-  )
+  /**
+   * «Facturar»: propone el importe pendiente de facturar y, si el paciente ya
+   * pagó en caja, imputa esos cobros a la factura (sin duplicar el ingreso).
+   */
+  function handleInvoicePlan() {
+    if (!patient) return
+
+    if (!financials.hasData) {
+      setNotice({
+        tone: 'error',
+        message: 'Esperá a que cargue el estado de cobro y facturación del paciente.',
+      })
+
+      return
+    }
+
+    const draft = buildPlanInvoiceDraft(financials.summary)
+
+    if (draft.amount <= 0) {
+      setNotice({
+        tone: 'error',
+        message: 'El plan ya está respaldado por facturas emitidas.',
+      })
+
+      return
+    }
+
+    setInvoiceSeed({
+      patientId: patient.id,
+      patientName,
+      amount: draft.amount,
+      paymentAllocations:
+        draft.paymentAllocations.length > 0 ? draft.paymentAllocations : undefined,
+    })
+  }
 
   return (
     <div className="space-y-5">
@@ -449,15 +482,12 @@ export default function OdontogramPage() {
               onChangeStatus={handleChangeStatus}
               onRemove={handleRemove}
               onChargePlan={() => setIsChargingPlan(true)}
-              onInvoicePlan={() => {
-                if (!patient) return
-
-                setInvoiceSeed({
-                  patientId: patient.id,
-                  patientName,
-                  amount: chargeableTotal > 0 ? chargeableTotal : undefined,
-                })
-              }}
+              onInvoicePlan={handleInvoicePlan}
+              financials={financials.summary}
+              isFinancialLoading={financials.isLoading}
+              hasFinancialData={financials.hasData}
+              financialError={financials.error}
+              onRetryFinancials={financials.reload}
             />
           </div>
 
@@ -515,6 +545,7 @@ export default function OdontogramPage() {
           onClose={() => setInvoiceSeed(null)}
           onIssued={(invoice) => {
             setInvoiceSeed(null)
+            financials.reload()
             setNotice({
               tone: 'success',
               message: `Factura ${invoice.invoice_number} emitida por ${formatPYG(invoice.total)}.`,
