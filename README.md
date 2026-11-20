@@ -160,6 +160,7 @@ Las migraciones viven en `supabase/migrations` y se aplican **en orden**:
 | `20261111110000_invoicing_ruc_width.sql` | Ajusta la validación del RUC a base de 5–8 dígitos + verificador (`3870633-4`, `80012345-6`). |
 | `20261111120000_fiscal_receiver_documents.sql` | `patients.legal_name` (razón social del contribuyente que completa Tu RUC) y `clinic_tax_settings.occasional_customer_name` / `occasional_customer_ruc` (cliente ocasional / consumidor final configurable, por defecto `44444401-7`). |
 | `20261112100000_invoicing_payments_and_installments.sql` | Cobros y cuotas: `invoices.condition` / `installments_count`, `paid_amount`, `balance` generado y `payment_status`; tablas `invoice_payment_allocations` e `invoice_installments` con triggers de recálculo (`refresh_invoice_payment_totals`), vista `transaction_invoicing` (facturado y disponible por cobro) y RPCs `link_invoice_payment`, `register_invoice_payment` y `plan_invoice_installments`. `issue_invoice` ahora recibe la condición, el plan de cuotas, los cobros ya en caja y el cobro que se registra al emitir. |
+| `20261113100000_issuer_print_preferences.sql` | Preferencias de impresión por emisor: `tax_issuers.print_format` (`electronic_kude`, `autoimpresor_a4`, `preprinted_overlay`, `manual_none`), `print_copies`, `print_offset_x_mm` / `print_offset_y_mm` (±50 mm, pasos de 0,5) con CHECKs, backfill del formato según el timbrado activo y default `autoimpresor_a4`. |
 
 Se aplican de cualquiera de estas dos formas:
 
@@ -723,4 +724,42 @@ de la tarjeta y el paciente pasa a «Últimos atendidos». Si el canal se corta,
 
 
 
+
+
+### 13. Impresión de facturas: formato por emisor
+
+Cada emisor (`tax_issuers`) guarda **cómo se imprime** su factura; el timbrado solo define la
+numeración autorizada. Se edita en **Facturación → Configuración → Emisores** (selector visual de
+formato, copias y márgenes) y vive en las columnas `print_format`, `print_copies`,
+`print_offset_x_mm` y `print_offset_y_mm`
+(`20261113100000_issuer_print_preferences.sql`).
+
+| Formato | Qué imprime | Cuándo usarlo |
+| --- | --- | --- |
+| `electronic_kude` | KuDE A4 con CDC de 44 dígitos y bloque de QR | Factura electrónica del SIFEN (el QR definitivo lo agrega el proveedor). |
+| `autoimpresor_a4` | Factura fiscal completa sobre hoja A4 | Impresora láser o inyección con hoja en blanco. |
+| `preprinted_overlay` | Solo los datos, en tinta negra y sin bordes | Formulario o talonario preimpreso: se calza con márgenes en mm. |
+| `manual_none` | Recibo de Dinero A4 | Talonarios llenados a mano: no se imprime factura fiscal. |
+
+- **Copias:** `original_only` imprime solo el original del cliente y `original_duplicate` agrega
+  el duplicado de archivo (`ORIGINAL — CLIENTE`, `DUPLICADO — ARCHIVO`). El preimpreso siempre
+  usa una sola hoja rotulada `ORIGINAL`, porque el formulario físico ya trae sus copias.
+- **Calibración del preimpreso:** los márgenes X (izquierda) e Y (superior) van de −50 a 50 mm en
+  pasos de 0,5 mm; los positivos mueven los datos a la derecha y hacia abajo. Los campos aceptan
+  valores negativos y coma o punto decimal (`-2,5`), y se normalizan al salir del campo. La vista
+  previa permite probar sin guardar, imprimir una **hoja de prueba** con reglas de 10 mm y recién
+  después fijar los valores en el emisor con «Editar».
+- **Flujo posterior a la emisión:** al emitir desde `/facturacion`, `/caja` u `/odontograma` se
+  abre `InvoicePrintModal` con el formato del emisor, la vista previa A4 y el botón de impresión
+  que corresponde. El libro de facturas repite la acción por fila (icono de impresora) para
+  reimprimir, y el formato se puede cambiar solo para esa impresión sin tocar la configuración.
+- **Modo manual:** el modal avisa «Factura manual registrada en el Libro de Ventas» y ofrece el
+  **Recibo de Dinero A4**, que deja constancia del cobro pero no reemplaza al comprobante legal
+  (el formulario preimpreso del timbrado).
+- **Papel:** la impresión declara `@page { size: A4 portrait }` y monta únicamente la hoja en
+  `body > .invoice-print-printonly` (`invoice-print.css`), así el navegador no agrega encabezados,
+  pies ni recorta el contenido; cada copia ocupa una página.
+- **Compatibilidad:** si la migración todavía no se aplicó, `invoicing-service.ts` detecta la
+  columna faltante y sigue leyendo/escribiendo los emisores sin preferencias; la impresión cae al
+  formato sugerido por la modalidad del timbrado (`getSuggestedPrintFormat`).
 

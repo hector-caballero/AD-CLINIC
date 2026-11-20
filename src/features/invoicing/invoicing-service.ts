@@ -5,11 +5,17 @@ import { toInvoicingError } from './invoicing-errors'
 import type { InstallmentDraft } from './invoicing-payments'
 import { computeInvoiceBreakdown, computeVatBreakdown } from './invoicing-tax'
 import {
+  normalizePrintCopies,
+  normalizePrintFormat,
+  normalizePrintOffset,
+} from './invoicing-print'
+import {
   CLINIC_TAX_SETTINGS_SELECT,
   EXPENSE_INVOICE_SELECT,
   INVOICE_SELECT,
   INSTALLMENT_SELECT,
   PAYMENT_ALLOCATION_SELECT,
+  TAX_ISSUER_BASE_SELECT,
   TAX_ISSUER_SELECT,
   TIMBRADO_SELECT,
   getInvoicePaymentState,
@@ -22,6 +28,8 @@ import {
   type InvoiceIssuerRef,
   type InvoicePaymentAllocation,
   type InvoicePaymentAllocationInput,
+  type InvoicePrintCopies,
+  type InvoicePrintFormat,
   type InvoiceTimbradoRef,
   type InvoicingTimbrado,
   type OperationalMode,
@@ -183,6 +191,42 @@ export async function saveClinicTaxSettings(
 // Emisores
 // -----------------------------------------------------------------------------
 
+/**
+ * `true` cuando la migración de preferencias de impresión todavía no se aplicó:
+ * se sigue operando con los valores por defecto en lugar de romper la pantalla.
+ */
+function isMissingPrintColumns(error: {
+  code?: string
+  message?: string
+  details?: string | null
+}): boolean {
+  if (error.code === '42703' || error.code === 'PGRST204') return true
+
+  return /print_format|print_copies|print_offset/i.test(
+    `${error.message ?? ''} ${error.details ?? ''}`,
+  )
+}
+
+/** Fila de emisor tal como puede venir de la base (con o sin la migración). */
+type TaxIssuerRow = Omit<
+  TaxIssuer,
+  'print_format' | 'print_copies' | 'print_offset_x_mm' | 'print_offset_y_mm'
+> &
+  Partial<
+    Pick<TaxIssuer, 'print_format' | 'print_copies' | 'print_offset_x_mm' | 'print_offset_y_mm'>
+  >
+
+/** Completa las preferencias de impresión con los valores por defecto. */
+function withPrintDefaults(row: TaxIssuerRow): TaxIssuer {
+  return {
+    ...row,
+    print_format: normalizePrintFormat(row.print_format),
+    print_copies: normalizePrintCopies(row.print_copies),
+    print_offset_x_mm: normalizePrintOffset(row.print_offset_x_mm ?? 0),
+    print_offset_y_mm: normalizePrintOffset(row.print_offset_y_mm ?? 0),
+  }
+}
+
 export async function fetchTaxIssuers(): Promise<TaxIssuer[]> {
   const { data, error } = await supabase
     .from('tax_issuers')
@@ -190,9 +234,18 @@ export async function fetchTaxIssuers(): Promise<TaxIssuer[]> {
     .order('display_name', { ascending: true })
     .limit(ISSUERS_LIMIT)
 
-  if (error) throw toInvoicingError(error)
+  if (!error) return asArray<TaxIssuerRow>(data).map(withPrintDefaults)
+  if (!isMissingPrintColumns(error)) throw toInvoicingError(error)
 
-  return asArray<TaxIssuer>(data)
+  const fallback = await supabase
+    .from('tax_issuers')
+    .select(TAX_ISSUER_BASE_SELECT)
+    .order('display_name', { ascending: true })
+    .limit(ISSUERS_LIMIT)
+
+  if (fallback.error) throw toInvoicingError(fallback.error)
+
+  return asArray<TaxIssuerRow>(fallback.data).map(withPrintDefaults)
 }
 
 export type TaxIssuerInput = {
@@ -206,6 +259,31 @@ export type TaxIssuerInput = {
   linked_user_id: string | null
   is_active: boolean
   notes: string | null
+  /** Preferencias de impresión; si faltan se usan los valores por defecto. */
+  print_format?: InvoicePrintFormat
+  print_copies?: InvoicePrintCopies
+  print_offset_x_mm?: number
+  print_offset_y_mm?: number
+}
+
+/** Convierte un emisor guardado en la entrada editable del formulario. */
+export function toTaxIssuerInput(issuer: TaxIssuer): TaxIssuerInput {
+  return {
+    kind: issuer.kind,
+    display_name: issuer.display_name,
+    legal_name: issuer.legal_name,
+    ruc: issuer.ruc,
+    address: issuer.address,
+    phone: issuer.phone,
+    email: issuer.email,
+    linked_user_id: issuer.linked_user_id,
+    is_active: issuer.is_active,
+    notes: issuer.notes,
+    print_format: issuer.print_format,
+    print_copies: issuer.print_copies,
+    print_offset_x_mm: issuer.print_offset_x_mm,
+    print_offset_y_mm: issuer.print_offset_y_mm,
+  }
 }
 
 function normalizeIssuerInput(input: TaxIssuerInput): TaxIssuerInput {
@@ -229,37 +307,90 @@ function normalizeIssuerInput(input: TaxIssuerInput): TaxIssuerInput {
     linked_user_id: input.linked_user_id || null,
     is_active: input.is_active,
     notes: input.notes?.trim() || null,
+    print_format: normalizePrintFormat(input.print_format),
+    print_copies: normalizePrintCopies(input.print_copies),
+    print_offset_x_mm: normalizePrintOffset(input.print_offset_x_mm ?? 0),
+    print_offset_y_mm: normalizePrintOffset(input.print_offset_y_mm ?? 0),
+  }
+}
+
+/** Payload sin las columnas nuevas (para bases sin la migración aplicada). */
+function withoutPrintPreferences(input: TaxIssuerInput) {
+  return {
+    kind: input.kind,
+    display_name: input.display_name,
+    legal_name: input.legal_name,
+    ruc: input.ruc,
+    address: input.address,
+    phone: input.phone,
+    email: input.email,
+    linked_user_id: input.linked_user_id,
+    is_active: input.is_active,
+    notes: input.notes,
   }
 }
 
 export async function createTaxIssuer(input: TaxIssuerInput): Promise<TaxIssuer> {
+  const payload = normalizeIssuerInput(input)
   const { data, error } = await supabase
     .from('tax_issuers')
-    .insert(normalizeIssuerInput(input))
+    .insert(payload)
     .select(TAX_ISSUER_SELECT)
     .single()
 
-  if (error) throw toInvoicingError(error)
-  if (!data) throw new Error('No se recibió el emisor guardado. Recargá la lista.')
+  if (!error) {
+    if (!data) throw new Error('No se recibió el emisor guardado. Recargá la lista.')
 
-  return data as TaxIssuer
+    return withPrintDefaults(asRow<TaxIssuerRow>(data))
+  }
+
+  if (!isMissingPrintColumns(error)) throw toInvoicingError(error)
+
+  // Base sin la migración de impresión: se guarda el emisor y se avisa en la UI
+  // que las preferencias quedan en los valores por defecto.
+  const fallback = await supabase
+    .from('tax_issuers')
+    .insert(withoutPrintPreferences(payload))
+    .select(TAX_ISSUER_BASE_SELECT)
+    .single()
+
+  if (fallback.error) throw toInvoicingError(fallback.error)
+  if (!fallback.data) throw new Error('No se recibió el emisor guardado. Recargá la lista.')
+
+  return withPrintDefaults(asRow<TaxIssuerRow>(fallback.data))
 }
 
 export async function updateTaxIssuer(
   issuerId: string,
   input: TaxIssuerInput,
 ): Promise<TaxIssuer> {
+  const payload = normalizeIssuerInput(input)
   const { data, error } = await supabase
     .from('tax_issuers')
-    .update(normalizeIssuerInput(input))
+    .update(payload)
     .eq('id', issuerId)
     .select(TAX_ISSUER_SELECT)
     .single()
 
-  if (error) throw toInvoicingError(error)
-  if (!data) throw new Error('No se recibió el emisor actualizado. Recargá la lista.')
+  if (!error) {
+    if (!data) throw new Error('No se recibió el emisor actualizado. Recargá la lista.')
 
-  return data as TaxIssuer
+    return withPrintDefaults(asRow<TaxIssuerRow>(data))
+  }
+
+  if (!isMissingPrintColumns(error)) throw toInvoicingError(error)
+
+  const fallback = await supabase
+    .from('tax_issuers')
+    .update(withoutPrintPreferences(payload))
+    .eq('id', issuerId)
+    .select(TAX_ISSUER_BASE_SELECT)
+    .single()
+
+  if (fallback.error) throw toInvoicingError(fallback.error)
+  if (!fallback.data) throw new Error('No se recibió el emisor actualizado. Recargá la lista.')
+
+  return withPrintDefaults(asRow<TaxIssuerRow>(fallback.data))
 }
 
 /** Los emisores no se borran (sus facturas los referencian): se activan o pausan. */
@@ -274,10 +405,25 @@ export async function setTaxIssuerActive(
     .select(TAX_ISSUER_SELECT)
     .single()
 
-  if (error) throw toInvoicingError(error)
-  if (!data) throw new Error('No se pudo actualizar el emisor. Recargá la lista.')
+  if (!error) {
+    if (!data) throw new Error('No se pudo actualizar el emisor. Recargá la lista.')
 
-  return data as TaxIssuer
+    return withPrintDefaults(asRow<TaxIssuerRow>(data))
+  }
+
+  if (!isMissingPrintColumns(error)) throw toInvoicingError(error)
+
+  const fallback = await supabase
+    .from('tax_issuers')
+    .update({ is_active: isActive })
+    .eq('id', issuerId)
+    .select(TAX_ISSUER_BASE_SELECT)
+    .single()
+
+  if (fallback.error) throw toInvoicingError(fallback.error)
+  if (!fallback.data) throw new Error('No se pudo actualizar el emisor. Recargá la lista.')
+
+  return withPrintDefaults(asRow<TaxIssuerRow>(fallback.data))
 }
 
 

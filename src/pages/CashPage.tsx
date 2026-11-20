@@ -13,6 +13,7 @@ import { countMovementsByType, filterMovements } from '../features/cash/cash-met
 import { getMovementPatientName } from '../features/cash/cash-types'
 import { useCashInvoicing } from '../features/cash/useCashInvoicing'
 import { InvoiceFormModal, type InvoiceSeed } from '../features/invoicing/InvoiceFormModal'
+import { InvoicePrintModal } from '../features/invoicing/InvoicePrintModal'
 import type { Invoice } from '../features/invoicing/invoicing-types'
 import type {
   CashMovement,
@@ -48,6 +49,7 @@ export default function CashPage() {
   const [registerState, setRegisterState] = useState<{ patientId?: string } | null>(null)
   const [accountPatientId, setAccountPatientId] = useState<string | null>(null)
   const [invoiceSeed, setInvoiceSeed] = useState<InvoiceSeed | null>(null)
+  const [printTarget, setPrintTarget] = useState<Invoice | null>(null)
   const [selectedMovementIds, setSelectedMovementIds] = useState<string[]>([])
   const [notice, setNotice] = useState<string | null>(null)
 
@@ -188,6 +190,8 @@ export default function CashPage() {
 
     reloadMovements()
     cashInvoicing.reload()
+    // El formato de impresión lo define el emisor (KuDE, A4, preimpreso o manual).
+    setPrintTarget(invoice)
   }
 
   function handleSaved(result: MovementResult, patientName: string) {
@@ -496,6 +500,14 @@ export default function CashPage() {
           seed={invoiceSeed}
           onClose={() => setInvoiceSeed(null)}
           onIssued={handleInvoiceIssued}
+        />
+      )}
+
+      {printTarget && (
+        <InvoicePrintModal
+          key={printTarget.id}
+          invoice={printTarget}
+          onClose={() => setPrintTarget(null)}
         />
       )}
     </div>

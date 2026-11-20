@@ -7,6 +7,7 @@ import {
   Pencil,
   Plus,
   Power,
+  Printer,
   Save,
   UserRound,
 } from 'lucide-react'
@@ -24,6 +25,10 @@ import {
   padSequence,
   RUC_FORMAT_HINT,
 } from './invoicing-format'
+import {
+  INVOICE_PRINT_FORMAT_SHORT_LABELS,
+  describeIssuerPrintSettings,
+} from './invoicing-print'
 import {
   OPERATIONAL_MODE_OPTIONS,
   TIMBRADO_MODE_LABELS,
@@ -397,6 +402,16 @@ function IssuerRow({
           >
             {isCompany ? 'Empresa' : 'Persona física'}
           </span>
+          <span
+            className={`${BADGE_CLASS} ${
+              issuer.print_format === 'manual_none'
+                ? 'bg-amber-50 text-amber-700 ring-amber-200'
+                : 'bg-sky-50 text-sky-700 ring-sky-200'
+            }`}
+          >
+            <Printer className="size-3" aria-hidden="true" />
+            {INVOICE_PRINT_FORMAT_SHORT_LABELS[issuer.print_format]}
+          </span>
           {!issuer.is_active && (
             <span className={`${BADGE_CLASS} bg-amber-50 text-amber-700 ring-amber-200`}>
               Inactivo
@@ -413,6 +428,9 @@ function IssuerRow({
           {issuer.legal_name && issuer.legal_name !== issuer.display_name
             ? ` · ${issuer.legal_name}`
             : ''}
+        </p>
+        <p className="mt-0.5 truncate text-[11px] text-slate-400">
+          {describeIssuerPrintSettings(issuer)}
         </p>
       </div>
 

@@ -1,4 +1,4 @@
-import { Ban, Banknote } from 'lucide-react'
+import { Ban, Banknote, Printer } from 'lucide-react'
 import { formatPYG, formatShortDate } from '../../lib/format'
 import { getStoredIvaTotal } from './invoicing-tax'
 import {
@@ -21,6 +21,8 @@ type InvoicesTableProps = {
   onCancel: (invoice: Invoice) => void
   /** Abre el registro de cobro/abono; sin handler no se muestra el botón. */
   onRegisterPayment?: (invoice: Invoice) => void
+  /** Abre la vista previa de impresión; sin handler no se muestra el botón. */
+  onPrint?: (invoice: Invoice) => void
 }
 
 const HEAD_CLASS = 'px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500'
@@ -77,6 +79,37 @@ function CancelButton({
 }
 
 /**
+ * Abre la vista previa de impresión (KuDE, A4, preimpreso o recibo manual).
+ * El formato y los márgenes los resuelve `InvoicePrintModal` con el emisor.
+ */
+function PrintButton({
+  invoice,
+  onPrint,
+  withLabel = false,
+}: {
+  invoice: Invoice
+  onPrint: (invoice: Invoice) => void
+  withLabel?: boolean
+}) {
+  return (
+    <button
+      type="button"
+      onClick={() => onPrint(invoice)}
+      aria-label={`Imprimir la factura ${invoice.invoice_number}`}
+      title="Imprimir factura"
+      className={
+        withLabel
+          ? 'inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white/85 px-2.5 py-1 text-xs font-medium text-slate-700 transition-colors hover:border-brand-300 hover:bg-brand-50 hover:text-brand-800'
+          : 'rounded-lg border border-slate-300 bg-white/85 p-1.5 text-slate-500 transition-colors hover:border-brand-300 hover:bg-brand-50 hover:text-brand-700'
+      }
+    >
+      <Printer className={withLabel ? 'size-3.5' : 'size-4'} aria-hidden="true" />
+      {withLabel ? 'Imprimir' : null}
+    </button>
+  )
+}
+
+/**
  * Libro de facturas emitidas.
  *
  * Muestra el número fiscal, el emisor (clave en el modo multi-emisor), el
@@ -89,6 +122,7 @@ export function InvoicesTable({
   occasionalRuc,
   onCancel,
   onRegisterPayment,
+  onPrint,
 }: InvoicesTableProps) {
   return (
     <>
@@ -236,6 +270,7 @@ export function InvoicesTable({
                       <span className="text-[11px] text-slate-400">—</span>
                     ) : (
                       <div className="flex items-center justify-end gap-1.5">
+                        {onPrint && <PrintButton invoice={invoice} onPrint={onPrint} />}
                         {canCollect && onRegisterPayment && (
                           <button
                             type="button"
@@ -332,6 +367,7 @@ export function InvoicesTable({
                         Cobrar
                       </button>
                     )}
+                    {onPrint && <PrintButton invoice={invoice} onPrint={onPrint} withLabel />}
                     <button
                       type="button"
                       onClick={() => onCancel(invoice)}

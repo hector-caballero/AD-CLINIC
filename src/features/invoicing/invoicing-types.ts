@@ -25,6 +25,24 @@ export type TaxIssuerKind = 'individual' | 'company'
 
 export type TimbradoMode = 'manual' | 'preprinted' | 'autoimpresor' | 'electronic'
 
+/**
+ * Cómo imprime cada emisor sus facturas:
+ * - `electronic_kude`: KuDE A4 con QR y CDC (SIFEN).
+ * - `autoimpresor_a4`: diseño fiscal completo sobre hoja A4 en blanco.
+ * - `preprinted_overlay`: solo los datos (sin bordes ni membretes) para calzar
+ *   sobre un formulario preimpreso, con márgenes de calibración en mm.
+ * - `manual_none`: talonario llenado a mano; no se imprime factura fiscal, solo
+ *   el Recibo de Dinero A4.
+ */
+export type InvoicePrintFormat =
+  | 'electronic_kude'
+  | 'autoimpresor_a4'
+  | 'preprinted_overlay'
+  | 'manual_none'
+
+/** Copias que se emiten de cada factura. */
+export type InvoicePrintCopies = 'original_only' | 'original_duplicate'
+
 export type InvoiceStatus = 'issued' | 'cancelled'
 
 /** Condición de pago: al contado o a crédito (en cuotas o a plazo). */
@@ -56,6 +74,14 @@ export type TaxIssuer = {
   /** Perfil del profesional (`profiles.id`) al que pertenece este emisor. */
   linked_user_id: string | null
   notes: string | null
+  /** Formato con el que se imprimen sus facturas. */
+  print_format: InvoicePrintFormat
+  /** `original_only` o `original_duplicate` (cliente + archivo). */
+  print_copies: InvoicePrintCopies
+  /** Ajuste fino horizontal (mm) sobre formularios preimpresos. */
+  print_offset_x_mm: number
+  /** Ajuste fino vertical (mm) sobre formularios preimpresos. */
+  print_offset_y_mm: number
   created_at: string
   updated_at: string
 }
@@ -232,9 +258,21 @@ export type ExpenseInvoice = {
 }
 
 
-/** Columnas de `tax_issuers`. */
-export const TAX_ISSUER_SELECT =
+/** Columnas de `tax_issuers` (sin las preferencias de impresión). */
+export const TAX_ISSUER_BASE_SELECT =
   'id, kind, display_name, legal_name, ruc, address, phone, email, is_active, linked_user_id, notes, created_at, updated_at'
+
+/**
+ * Columnas de `tax_issuers` con las preferencias de impresión
+ * (`20261113100000_issuer_print_preferences.sql`).
+ */
+export const TAX_ISSUER_SELECT = [
+  TAX_ISSUER_BASE_SELECT,
+  'print_format',
+  'print_copies',
+  'print_offset_x_mm',
+  'print_offset_y_mm',
+].join(', ')
 
 /** Columnas de `clinic_tax_settings`. */
 export const CLINIC_TAX_SETTINGS_SELECT =

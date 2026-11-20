@@ -1,11 +1,32 @@
 import { useState, type FormEvent } from 'react'
-import { AlertCircle, Building2, Loader2, Save, UserRound } from 'lucide-react'
+import {
+  AlertCircle,
+  Building2,
+  FileText,
+  Loader2,
+  Printer,
+  Receipt,
+  Ruler,
+  Save,
+  UserRound,
+} from 'lucide-react'
 import { Modal } from '../../components/ui/Modal'
 import { formatPhonePY } from '../../lib/format'
 import { useStaffDirectory } from '../team/staff-directory'
 import { autoFormatRuc, isValidRuc, RUC_FORMAT_HINT } from './invoicing-format'
+import {
+  INVOICE_PRINT_COPY_OPTIONS,
+  INVOICE_PRINT_FORMAT_OPTIONS,
+  normalizePrintOffset,
+} from './invoicing-print'
 import { createTaxIssuer, updateTaxIssuer, type TaxIssuerInput } from './invoicing-service'
-import { ISSUER_KIND_OPTIONS, type TaxIssuer, type TaxIssuerKind } from './invoicing-types'
+import {
+  ISSUER_KIND_OPTIONS,
+  type InvoicePrintCopies,
+  type InvoicePrintFormat,
+  type TaxIssuer,
+  type TaxIssuerKind,
+} from './invoicing-types'
 import { RucLookupField } from './RucLookupField'
 
 type TaxIssuerFormModalProps = {
@@ -21,6 +42,13 @@ const INPUT_CLASS =
 const LABEL_CLASS = 'mb-1 block text-sm font-medium text-slate-700'
 
 const HELP_CLASS = 'mt-1 text-xs leading-relaxed text-slate-400'
+
+const PRINT_FORMAT_ICONS = {
+  electronic_kude: FileText,
+  autoimpresor_a4: Printer,
+  preprinted_overlay: Ruler,
+  manual_none: Receipt,
+} as const
 
 /**
  * Alta y edición de un emisor de facturas.
@@ -43,6 +71,15 @@ export function TaxIssuerFormModal({ issuer = null, onClose, onSaved }: TaxIssue
   const [linkedUserId, setLinkedUserId] = useState(issuer?.linked_user_id ?? '')
   const [isActive, setIsActive] = useState(issuer?.is_active ?? true)
   const [notes, setNotes] = useState(issuer?.notes ?? '')
+
+  const [printFormat, setPrintFormat] = useState<InvoicePrintFormat>(
+    issuer?.print_format ?? 'autoimpresor_a4',
+  )
+  const [printCopies, setPrintCopies] = useState<InvoicePrintCopies>(
+    issuer?.print_copies ?? 'original_duplicate',
+  )
+  const [printOffsetX, setPrintOffsetX] = useState(String(issuer?.print_offset_x_mm ?? 0))
+  const [printOffsetY, setPrintOffsetY] = useState(String(issuer?.print_offset_y_mm ?? 0))
 
   const [isSaving, setIsSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -72,6 +109,10 @@ export function TaxIssuerFormModal({ issuer = null, onClose, onSaved }: TaxIssue
       linked_user_id: linkedUserId || null,
       is_active: isActive,
       notes: notes.trim() || null,
+      print_format: printFormat,
+      print_copies: printCopies,
+      print_offset_x_mm: normalizePrintOffset(printOffsetX),
+      print_offset_y_mm: normalizePrintOffset(printOffsetY),
     }
 
     try {
@@ -301,6 +342,125 @@ export function TaxIssuerFormModal({ issuer = null, onClose, onSaved }: TaxIssue
             />
           </div>
         </div>
+
+        <fieldset className="space-y-2">
+          <legend className={LABEL_CLASS}>Formato de impresión de facturas</legend>
+          <div className="grid gap-2 sm:grid-cols-2">
+            {INVOICE_PRINT_FORMAT_OPTIONS.map((option) => {
+              const Icon = PRINT_FORMAT_ICONS[option.value]
+              const selected = printFormat === option.value
+
+              return (
+                <label
+                  key={option.value}
+                  className={`flex cursor-pointer items-start gap-2.5 rounded-xl border px-3 py-2.5 transition-colors ${
+                    selected
+                      ? 'border-brand-400 bg-brand-50/60 ring-1 ring-brand-300'
+                      : 'border-slate-200 bg-white/70 hover:border-slate-300'
+                  }`}
+                >
+                  <input
+                    type="radio"
+                    name="issuer-print-format"
+                    value={option.value}
+                    checked={selected}
+                    onChange={() => setPrintFormat(option.value)}
+                    disabled={isSaving}
+                    className="mt-0.5 size-4 shrink-0 accent-brand-600"
+                  />
+                  <span className="min-w-0">
+                    <span className="flex items-center gap-1.5 text-sm font-medium text-slate-900">
+                      <Icon className="size-3.5 text-slate-400" aria-hidden="true" />
+                      {option.label}
+                    </span>
+                    <span className="mt-0.5 block text-xs leading-relaxed text-slate-500">
+                      {option.description}
+                    </span>
+                  </span>
+                </label>
+              )
+            })}
+          </div>
+          <p className={HELP_CLASS}>
+            {
+              INVOICE_PRINT_FORMAT_OPTIONS.find((option) => option.value === printFormat)
+                ?.hint
+            }
+          </p>
+        </fieldset>
+
+        {printFormat !== 'manual_none' && (
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div>
+              <label htmlFor="issuer-print-copies" className={LABEL_CLASS}>
+                Copias
+              </label>
+              <select
+                id="issuer-print-copies"
+                value={printCopies}
+                onChange={(event) => setPrintCopies(event.target.value as InvoicePrintCopies)}
+                disabled={isSaving}
+                className={INPUT_CLASS}
+              >
+                {INVOICE_PRINT_COPY_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+              <p className={HELP_CLASS}>
+                {
+                  INVOICE_PRINT_COPY_OPTIONS.find((option) => option.value === printCopies)
+                    ?.description
+                }
+              </p>
+            </div>
+
+            {printFormat === 'preprinted_overlay' && (
+              <div className="space-y-1 rounded-xl bg-brand-50/60 px-3 py-2 text-xs leading-relaxed text-bronze-700 ring-1 ring-brand-200">
+                El formulario preimpreso ya trae el membrete y los recuadros: el sistema solo
+                imprime los valores en negro. Calibrá con la hoja de prueba desde la vista previa.
+              </div>
+            )}
+          </div>
+        )}
+
+        {printFormat === 'preprinted_overlay' && (
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div>
+              <label htmlFor="issuer-print-offset-x" className={LABEL_CLASS}>
+                Margen izquierdo (mm)
+              </label>
+              <input
+                id="issuer-print-offset-x"
+                type="text"
+                inputMode="decimal"
+                value={printOffsetX}
+                onChange={(event) => setPrintOffsetX(event.target.value)}
+                onBlur={() => setPrintOffsetX(String(normalizePrintOffset(printOffsetX)))}
+                disabled={isSaving}
+                className={INPUT_CLASS}
+              />
+              <p className={HELP_CLASS}>Positivo mueve los datos hacia la derecha (±50 mm).</p>
+            </div>
+            <div>
+              <label htmlFor="issuer-print-offset-y" className={LABEL_CLASS}>
+                Margen superior (mm)
+              </label>
+              <input
+                id="issuer-print-offset-y"
+                type="text"
+                inputMode="decimal"
+                value={printOffsetY}
+                onChange={(event) => setPrintOffsetY(event.target.value)}
+                onBlur={() => setPrintOffsetY(String(normalizePrintOffset(printOffsetY)))}
+                disabled={isSaving}
+                className={INPUT_CLASS}
+              />
+              <p className={HELP_CLASS}>Positivo baja los datos en la hoja (±50 mm).</p>
+            </div>
+          </div>
+        )}
 
         <label className="flex items-start gap-2.5 rounded-xl bg-slate-50 px-3 py-2.5 ring-1 ring-slate-200">
           <input

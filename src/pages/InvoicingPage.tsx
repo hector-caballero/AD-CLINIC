@@ -18,6 +18,7 @@ import { ExpenseInvoiceFormModal } from '../features/invoicing/ExpenseInvoiceFor
 import { ExpensesTable } from '../features/invoicing/ExpensesTable'
 import { InvoiceFormModal, type InvoiceSeed } from '../features/invoicing/InvoiceFormModal'
 import { InvoicePaymentModal } from '../features/invoicing/InvoicePaymentModal'
+import { InvoicePrintModal } from '../features/invoicing/InvoicePrintModal'
 import { InvoicingSettings } from '../features/invoicing/InvoicingSettings'
 import { InvoicesTable } from '../features/invoicing/InvoicesTable'
 import { deleteExpenseInvoice } from '../features/invoicing/invoicing-service'
@@ -75,6 +76,7 @@ export default function InvoicingPage() {
   const [expenseModal, setExpenseModal] = useState<{ expense: ExpenseInvoice | null } | null>(null)
   const [cancelTarget, setCancelTarget] = useState<Invoice | null>(null)
   const [paymentTarget, setPaymentTarget] = useState<Invoice | null>(null)
+  const [printTarget, setPrintTarget] = useState<Invoice | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<ExpenseInvoice | null>(null)
   const [isDeleting, setIsDeleting] = useState(false)
   const [deleteError, setDeleteError] = useState<string | null>(null)
@@ -151,6 +153,9 @@ export default function InvoicingPage() {
     setIssueSeed(null)
     setTab('invoices')
     setNotice(`Factura ${invoice.invoice_number} emitida por ${formatPYG(invoice.total)}.`)
+    // Después de emitir se abre la vista previa: el emisor decide si es KuDE,
+    // A4, caída sobre preimpreso o solo un recibo (talonario manual).
+    setPrintTarget(invoice)
   }
 
   function handleCancelled(invoice: Invoice) {
@@ -436,6 +441,7 @@ export default function InvoicingPage() {
                 occasionalRuc={occasionalRuc}
                 onCancel={setCancelTarget}
                 onRegisterPayment={setPaymentTarget}
+                onPrint={setPrintTarget}
               />
             </>
           )}
@@ -613,6 +619,14 @@ export default function InvoicingPage() {
           invoice={paymentTarget}
           onClose={() => setPaymentTarget(null)}
           onRegistered={handlePaymentRegistered}
+        />
+      )}
+
+      {printTarget && (
+        <InvoicePrintModal
+          key={printTarget.id}
+          invoice={printTarget}
+          onClose={() => setPrintTarget(null)}
         />
       )}
 

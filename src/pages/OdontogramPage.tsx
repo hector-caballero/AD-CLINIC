@@ -31,6 +31,8 @@ import { useOdontogram } from '../features/odontogram/useOdontogram'
 import { buildPlanInvoiceDraft } from '../features/odontogram/odontogram-financials'
 import { usePlanFinancials } from '../features/odontogram/usePlanFinancials'
 import { InvoiceFormModal, type InvoiceSeed } from '../features/invoicing/InvoiceFormModal'
+import { InvoicePrintModal } from '../features/invoicing/InvoicePrintModal'
+import type { Invoice } from '../features/invoicing/invoicing-types'
 import { getInitials, formatPYG } from '../lib/format'
 
 const SECONDARY_BUTTON_CLASS =
@@ -62,6 +64,7 @@ export default function OdontogramPage() {
   const [busyItemId, setBusyItemId] = useState<string | null>(null)
   const [isChargingPlan, setIsChargingPlan] = useState(false)
   const [invoiceSeed, setInvoiceSeed] = useState<InvoiceSeed | null>(null)
+  const [printTarget, setPrintTarget] = useState<Invoice | null>(null)
 
   const {
     patients,
@@ -550,7 +553,17 @@ export default function OdontogramPage() {
               tone: 'success',
               message: `Factura ${invoice.invoice_number} emitida por ${formatPYG(invoice.total)}.`,
             })
+            // Vista previa según el formato del emisor (KuDE, A4, preimpreso o manual).
+            setPrintTarget(invoice)
           }}
+        />
+      )}
+
+      {printTarget && (
+        <InvoicePrintModal
+          key={printTarget.id}
+          invoice={printTarget}
+          onClose={() => setPrintTarget(null)}
         />
       )}
     </div>

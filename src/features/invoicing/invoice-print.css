@@ -1,0 +1,79 @@
+/*
+ * Impresión A4 de comprobantes (facturas, KuDE y Recibos de Dinero).
+ *
+ * La previsualización vive dentro del modal; la copia que realmente se manda a
+ * la impresora se monta en un portal `body > .invoice-print-printonly`, fuera
+ * del layout de la aplicación. Así la paginación es la del navegador (una hoja
+ * A4 por página) y nada del modal recorta la factura.
+ */
+
+.invoice-print-sheet {
+  width: 210mm;
+  min-height: 297mm;
+  box-sizing: border-box;
+  background: #fff;
+  color: #1f2937;
+}
+
+/* Oculto en pantalla: solo existe para `@media print`. */
+.invoice-print-printonly {
+  display: none;
+}
+
+/* Caída sobre formularios preimpresos: tinta negra, sin fondos ni bordes. */
+.invoice-print-overlay {
+  color: #000;
+  background: transparent;
+}
+
+/*
+ * La vista previa se reduce para entrar en el modal sin scroll horizontal.
+ * El zoom no toca la copia impresa: esa hoja se monta en el portal
+ * `.invoice-print-printonly`, fuera de este contenedor.
+ */
+.invoice-print-viewport .invoice-print-sheet {
+  zoom: 0.78;
+}
+
+@media print {
+  @page {
+    size: A4 portrait;
+    margin: 0;
+  }
+
+  html,
+  body {
+    margin: 0 !important;
+    padding: 0 !important;
+    background: #fff !important;
+  }
+
+  /* Solo se imprime la copia preparada: ni la app ni el modal salen en papel. */
+  body > *:not(.invoice-print-printonly) {
+    display: none !important;
+  }
+
+  .invoice-print-printonly {
+    display: block !important;
+  }
+
+  .invoice-print-sheet {
+    width: 210mm;
+    /* 296 mm y no 297: con `@page { margin: 0 }` el redondeo del navegador
+       agrega una página en blanco al final si la hoja mide exacto el alto A4. */
+    min-height: 296mm;
+    margin: 0 !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+    break-after: page;
+    page-break-after: always;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  .invoice-print-sheet:last-child {
+    break-after: auto;
+    page-break-after: auto;
+  }
+}

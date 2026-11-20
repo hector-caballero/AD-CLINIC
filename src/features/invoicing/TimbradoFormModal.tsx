@@ -1,8 +1,9 @@
 import { useState, type FormEvent } from 'react'
-import { AlertCircle, Hash, Loader2, Save } from 'lucide-react'
+import { AlertCircle, Hash, Loader2, Printer, Save } from 'lucide-react'
 import { Modal } from '../../components/ui/Modal'
 import { formatShortDate } from '../../lib/format'
 import { formatGroupInput, formatTimbradoInput, getTodayKey } from './invoicing-format'
+import { INVOICE_PRINT_FORMAT_LABELS, getSuggestedPrintFormat } from './invoicing-print'
 import { createTimbrado, updateTimbrado, type TimbradoInput } from './invoicing-service'
 import {
   TIMBRADO_MODE_OPTIONS,
@@ -242,6 +243,16 @@ export function TimbradoFormModal({
           </select>
           <p className={HELP_CLASS}>
             {modeOption?.description} {modeOption?.numberHint}
+          </p>
+          <p className="mt-1.5 flex items-start gap-1.5 rounded-xl bg-brand-50/60 px-2.5 py-1.5 text-xs leading-relaxed text-bronze-700 ring-1 ring-brand-200">
+            <Printer className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
+            <span>
+              Formato de impresión sugerido:{' '}
+              <strong className="font-semibold">
+                {INVOICE_PRINT_FORMAT_LABELS[getSuggestedPrintFormat(mode)]}
+              </strong>
+              . Se define por emisor en Configuración → Emisores → Editar.
+            </span>
           </p>
         </div>
 
