@@ -245,6 +245,7 @@ src/
 ├─ features/treatments/       catálogo: servicio, hook, toolbar, tabla, modal
 ├─ features/odontogram/       odontograma SVG, servicio de ítems, presupuesto, estado de cobro y facturación, dictado por voz y cobro del plan
 ├─ features/team/             equipo: servicio, hook, toolbar, tabla y modales + directorio (`staff_directory`)
+├─ features/invoicing/        facturación legal: libro de ventas, emisores, timbrados, gastos e impresión
 ├─ features/tv/               pantalla de sala: cola derivada, servicio, Realtime, anuncios y componentes
 ├─ components/
 │  ├─ layout/AppLayout.tsx       sidebar fija (lg+) + drawer móvil + header
@@ -252,7 +253,7 @@ src/
 │  ├─ layout/Logo.tsx            placa con el JPEG oficial (encuadres full / compact)
 │  ├─ layout/Brand.tsx           envoltorio del logotipo para login y navegación
 │  ├─ layout/nav-items.ts        definición de las secciones del menú
-│  └─ ui/                        Modal, FullScreenLoader, ComingSoon
+│  └─ ui/                        Modal, ConfirmDialog, FullScreenLoader, ComingSoon, TagInput
 ├─ hooks/useOnlineStatus.ts      eventos online/offline del navegador
 └─ pages/                        LoginPage + una página por sección
 ```
@@ -266,6 +267,7 @@ src/
 | `/tratamientos` | Catálogo de tratamientos (precios en PYG) | Privada |
 | `/odontograma` | Odontograma interactivo y presupuesto dental | Privada (escritura: `dentist` / `admin`) |
 | `/caja` | Caja y finanzas | Privada |
+| `/facturacion` | Facturación legal, emisores, timbrados y gastos | Privada |
 | `/tv` | Pantalla de sala (modo TV / turnero), sin el layout con menú | Privada |
 | `/equipo` | Equipo y roles | Solo `admin` |
 
