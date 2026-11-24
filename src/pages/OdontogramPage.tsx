@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { AlertCircle, CircleCheck, RefreshCw, Users, X } from 'lucide-react'
 import { Modal } from '../components/ui/Modal'
@@ -34,6 +34,11 @@ import { InvoiceFormModal, type InvoiceSeed } from '../features/invoicing/Invoic
 import { InvoicePrintModal } from '../features/invoicing/InvoicePrintModal'
 import type { Invoice } from '../features/invoicing/invoicing-types'
 import { getInitials, formatPYG } from '../lib/format'
+import { useAssistantPatient } from '../features/voice-assistant/assistant-context'
+import {
+  affectsPatient,
+  subscribeAssistantDataChanges,
+} from '../features/voice-assistant/assistant-events'
 
 const SECONDARY_BUTTON_CLASS =
   'inline-flex items-center justify-center gap-2 rounded-xl border border-slate-300 bg-white/85 px-3.5 py-2 text-sm font-medium text-slate-700 shadow-sm transition-colors hover:bg-slate-50'
@@ -81,6 +86,27 @@ export default function OdontogramPage() {
   const odontogram = useOdontogram(patient?.id ?? null, dentition)
   const financials = usePlanFinancials(patient?.id ?? null, odontogram.items)
 
+  const { setActivePatient } = useAssistantPatient()
+  const reloadOdontogram = odontogram.reload
+  const activePatientId = patient?.id ?? null
+
+  // El paciente abierto en el odontograma es el paciente activo del copiloto.
+  useEffect(() => {
+    if (!patient) return
+
+    setActivePatient(patient)
+  }, [patient, setActivePatient])
+
+  // Si el copiloto guarda un hallazgo, recargamos las piezas de este paciente.
+  useEffect(() => {
+    return subscribeAssistantDataChanges((change) => {
+      if (change.scope !== 'odontogram') return
+      if (!affectsPatient(change, activePatientId)) return
+
+      reloadOdontogram()
+    })
+  }, [activePatientId, reloadOdontogram])
+
   function selectPatient(next: Patient) {
     setSearchParams({ paciente: next.id })
     setSelection(null)
@@ -92,6 +118,7 @@ export default function OdontogramPage() {
     setSearchParams({})
     setSelection(null)
     setNotice(null)
+    setActivePatient(null)
   }
 
   function changeDentition(next: Dentition) {

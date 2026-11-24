@@ -1,5 +1,6 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { AlertCircle, FileText, Loader2, ReceiptText, RefreshCw, SearchX, X } from 'lucide-react'
+import { useSearchParams } from 'react-router-dom'
 import { formatPYG } from '../lib/format'
 import { BalancesPanel } from '../features/cash/BalancesPanel'
 import { CashSummaryCards } from '../features/cash/CashSummaryCards'
@@ -25,6 +26,7 @@ import type {
 import { useCashMovements } from '../features/cash/useCashMovements'
 import { useCashOverview } from '../features/cash/useCashOverview'
 import { usePatients } from '../features/patients/usePatients'
+import { useAssistantPatient } from '../features/voice-assistant/assistant-context'
 
 const PRIMARY_BUTTON_CLASS =
   'inline-flex items-center justify-center gap-2 rounded-xl bg-brand-500 px-4 py-2.5 text-sm font-semibold text-ink-950 shadow-sm shadow-brand-500/30 ring-1 ring-brand-600/25 transition-colors hover:bg-brand-400'
@@ -53,7 +55,13 @@ export default function CashPage() {
   const [selectedMovementIds, setSelectedMovementIds] = useState<string[]>([])
   const [notice, setNotice] = useState<string | null>(null)
 
-  const { patients, error: patientsError, reload: reloadPatients } = usePatients()
+  const { setActivePatient } = useAssistantPatient()
+  const [searchParams, setSearchParams] = useSearchParams()
+  const requestedPatientId = searchParams.get('paciente')
+  const shouldCollect = searchParams.get('cobrar') === '1'
+
+  const { patients, isLoading: isPatientsLoading, error: patientsError, reload: reloadPatients } =
+    usePatients()
   const overview = useCashOverview()
   const {
     movements,
@@ -101,13 +109,36 @@ export default function CashPage() {
 
   const hasFilters = query.trim().length > 0 || typeFilter !== 'all'
 
+  // El copiloto abre la caja con el cobro listo (`/caja?paciente=<id>&cobrar=1`).
+  useEffect(() => {
+    if (!requestedPatientId || !shouldCollect) return
+    // Esperamos el listado para que el modal muestre la ficha, no un select vacío.
+    if (isPatientsLoading) return
+
+    // Sincronizar el modal con la URL: el enlace profundo llega ya montada la página.
+    // oxlint-disable-next-line react/set-state-in-effect
+    setRegisterState({ patientId: requestedPatientId })
+    setSearchParams({}, { replace: true })
+  }, [isPatientsLoading, requestedPatientId, setSearchParams, shouldCollect])
+
+  /** Sincroniza el paciente activo del copiloto con el que se está cobrando. */
+  function activatePatient(patientId?: string | null) {
+    if (!patientId) return
+
+    const target = patients.find((patient) => patient.id === patientId)
+
+    if (target) setActivePatient(target)
+  }
+
   function openRegister(patientId?: string) {
     setNotice(null)
+    activatePatient(patientId)
     setRegisterState(patientId ? { patientId } : {})
   }
 
   function openAccount(patientId: string) {
     setNotice(null)
+    activatePatient(patientId)
     setAccountPatientId(patientId)
   }
 
@@ -119,6 +150,7 @@ export default function CashPage() {
     const available = getAvailableAmount(cashInvoicing.invoicing.get(movement.id))
 
     setNotice(null)
+    activatePatient(movement.patient_id)
     setInvoiceSeed({
       patientId: movement.patient_id,
       patientName: getMovementPatientName(movement),

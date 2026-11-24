@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { AlertCircle, CalendarPlus, CalendarX2, Loader2, RefreshCw, X } from 'lucide-react'
 import { AgendaList } from '../features/appointments/AgendaList'
 import { AgendaToolbar } from '../features/appointments/AgendaToolbar'
@@ -29,6 +29,7 @@ import {
 import { buildReminderUrl } from '../features/appointments/appointment-whatsapp'
 import { useAppointments } from '../features/appointments/useAppointments'
 import { usePatients } from '../features/patients/usePatients'
+import { subscribeAssistantDataChanges } from '../features/voice-assistant/assistant-events'
 import { formatPhonePY } from '../lib/format'
 import { getWhatsAppStatus, sendAppointmentReminder } from '../services/whatsapp'
 
@@ -57,6 +58,13 @@ export default function AppointmentsPage() {
   const { appointments, isLoading, error, reload, applyAppointment, patchAppointment } =
     useAppointments({ fromIso: range.startIso, toIso: range.endIso })
   const { patients, error: patientsError, reload: reloadPatients } = usePatients()
+
+  // El copiloto agenda seguimientos y llama pacientes: refrescamos la agenda.
+  useEffect(() => {
+    return subscribeAssistantDataChanges((change) => {
+      if (change.scope === 'appointments') reload()
+    })
+  }, [reload])
 
   const [formState, setFormState] = useState<FormState>(null)
   const [cancelTarget, setCancelTarget] = useState<AppointmentWithPatient | null>(null)

@@ -1,5 +1,6 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { AlertCircle, Loader2, RefreshCw, SearchX, Users, X } from 'lucide-react'
+import { useSearchParams } from 'react-router-dom'
 import { ConfirmDialog } from '../components/ui/ConfirmDialog'
 import { PatientAnamnesisModal } from '../features/patients/PatientAnamnesisModal'
 import { PatientFormModal } from '../features/patients/PatientFormModal'
@@ -14,6 +15,7 @@ import {
 } from '../features/patients/patient-types'
 import { softDeletePatient } from '../features/patients/patients-service'
 import { usePatients } from '../features/patients/usePatients'
+import { useAssistantPatient } from '../features/voice-assistant/assistant-context'
 
 type FormState = { mode: 'create' } | { mode: 'edit'; patient: Patient } | null
 
@@ -41,6 +43,10 @@ export default function PatientsPage() {
   const [notice, setNotice] = useState<string | null>(null)
   const [anamnesisTarget, setAnamnesisTarget] = useState<Patient | null>(null)
 
+  const { setActivePatient } = useAssistantPatient()
+  const [searchParams, setSearchParams] = useSearchParams()
+  const requestedPatientId = searchParams.get('paciente')
+
   const counts = useMemo(
     () => ({
       all: patients.length,
@@ -57,6 +63,21 @@ export default function PatientsPage() {
 
   const hasFilters = query.trim().length > 0 || status !== 'all'
 
+  // El copiloto abre la ficha con `/pacientes?paciente=<id>`.
+  useEffect(() => {
+    if (!requestedPatientId) return
+
+    const target = patients.find((patient) => patient.id === requestedPatientId)
+
+    if (!target) return
+
+    setActivePatient(target)
+    // Abrir la ficha desde el enlace profundo del copiloto (la página ya está montada).
+    // oxlint-disable-next-line react/set-state-in-effect
+    setFormState({ mode: 'edit', patient: target })
+    setSearchParams({}, { replace: true })
+  }, [patients, requestedPatientId, setActivePatient, setSearchParams])
+
   function clearFilters() {
     setQuery('')
     setStatus('all')
@@ -69,6 +90,7 @@ export default function PatientsPage() {
 
   function openEdit(patient: Patient) {
     setNotice(null)
+    setActivePatient(patient)
     setFormState({ mode: 'edit', patient })
   }
 
@@ -78,6 +100,7 @@ export default function PatientsPage() {
 
   function openAnamnesis(patient: Patient) {
     setNotice(null)
+    setActivePatient(patient)
     setAnamnesisTarget(patient)
   }
 

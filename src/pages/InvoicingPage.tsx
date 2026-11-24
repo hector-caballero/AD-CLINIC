@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import {
   AlertCircle,
   Download,
@@ -11,6 +11,7 @@ import {
   SearchX,
   X,
 } from 'lucide-react'
+import { useSearchParams } from 'react-router-dom'
 import { ConfirmDialog } from '../components/ui/ConfirmDialog'
 import { formatPYG } from '../lib/format'
 import { CancelInvoiceModal } from '../features/invoicing/CancelInvoiceModal'
@@ -34,7 +35,9 @@ import {
 } from '../features/invoicing/sales-ledger-export'
 import { useInvoiceLedger } from '../features/invoicing/useInvoiceLedger'
 import { useInvoicing } from '../features/invoicing/useInvoicing'
+import { getPatientFullName } from '../features/patients/patient-types'
 import { usePatients } from '../features/patients/usePatients'
+import { useAssistantPatient } from '../features/voice-assistant/assistant-context'
 
 type LedgerTab = 'invoices' | 'expenses' | 'settings'
 
@@ -65,7 +68,7 @@ const INPUT_CLASS =
  * El número de factura lo resuelve la base al emitir; acá se ve el resultado.
  */
 export default function InvoicingPage() {
-  const { patients } = usePatients()
+  const { patients, isLoading: isPatientsLoading } = usePatients()
   const invoicing = useInvoicing()
   const ledger = useInvoiceLedger()
 
@@ -81,6 +84,39 @@ export default function InvoicingPage() {
   const [isDeleting, setIsDeleting] = useState(false)
   const [deleteError, setDeleteError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
+
+  const { setActivePatient } = useAssistantPatient()
+  const [searchParams, setSearchParams] = useSearchParams()
+  const requestedPatientId = searchParams.get('paciente')
+  const shouldIssue = searchParams.get('emitir') === '1'
+
+  // El copiloto abre la emisión con el paciente cargado
+  // (`/facturacion?paciente=<id>&emitir=1`).
+  useEffect(() => {
+    if (!requestedPatientId || !shouldIssue) return
+    // El modal precarga razón social y RUC: esperamos el listado de pacientes.
+    if (isPatientsLoading) return
+
+    const target = patients.find((patient) => patient.id === requestedPatientId) ?? null
+
+    // Precargar la emisión desde el enlace profundo del copiloto.
+    // oxlint-disable-next-line react/set-state-in-effect
+    setIssueSeed({
+      patientId: requestedPatientId,
+      patientName: target ? getPatientFullName(target) : null,
+    })
+
+    if (target) setActivePatient(target)
+
+    setSearchParams({}, { replace: true })
+  }, [
+    isPatientsLoading,
+    patients,
+    requestedPatientId,
+    setActivePatient,
+    setSearchParams,
+    shouldIssue,
+  ])
 
   /** RUC genérico del consumidor final (Configuración → Cliente ocasional). */
   const occasionalRuc = useMemo(

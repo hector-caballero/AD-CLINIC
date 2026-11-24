@@ -3,6 +3,8 @@ import { LogOut, Menu, X } from 'lucide-react'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../../features/auth/AuthContext'
 import { getRoleLabel } from '../../features/team/team-types'
+import { DoctorAssistantDock } from '../../features/voice-assistant/DoctorAssistantDock'
+import { DoctorAssistantProvider } from '../../features/voice-assistant/DoctorAssistantProvider'
 import { getInitials } from '../../lib/format'
 import { Brand } from './Brand'
 import { ConnectionStatus } from './ConnectionStatus'
@@ -239,7 +241,10 @@ export function AppLayout() {
         </header>
 
         <main className="mx-auto w-full max-w-7xl flex-1 px-4 py-6 lg:px-8 lg:py-8">
-          <Outlet />
+          <DoctorAssistantProvider>
+            <Outlet />
+            <DoctorAssistantDock />
+          </DoctorAssistantProvider>
         </main>
 
         <footer className="border-t border-slate-200/70 px-4 py-4 text-center text-xs text-bronze-600/90 lg:px-8">
