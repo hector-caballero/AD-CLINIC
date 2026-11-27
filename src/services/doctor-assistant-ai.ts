@@ -9,6 +9,7 @@ import type {
   ToothSurface,
 } from '../features/odontogram/odontogram-types'
 import {
+  ASSISTANT_NAVIGATION_TARGETS,
   ASSISTANT_STATUSES,
   ASSISTANT_SURFACES,
   type AssistantActionType,
@@ -16,6 +17,7 @@ import {
   type AssistantFollowupDraft,
   type AssistantGuidedCommand,
   type AssistantIntent,
+  type AssistantNavigationTarget,
   type AssistantOdontogramDraft,
   type AssistantOpenTarget,
 } from '../features/voice-assistant/assistant-types'
@@ -65,7 +67,7 @@ export type DoctorAssistantContext = {
 }
 
 export const ASSISTANT_LOCAL_HINT =
-  'Comando rápido activo. Configurá VITE_GEMINI_API_KEY para entender frases libres; sin la clave funcionan «llamar al siguiente», «alertas», «estado de cuenta», «modo guía», «preparar cobro» y «preparar factura».'
+  'Comando rápido activo. Configurá VITE_GEMINI_API_KEY para entender frases libres; sin la clave funcionan «llamar al siguiente», «alertas», «estado de cuenta», «resumen del día», «cuántas citas hay», «cuánto sale una endodoncia», «saldo de caja», «abrí la caja», «preparar cobro» y «preparar factura».'
 
 const MAX_COMMAND_CHARS = 400
 
@@ -73,6 +75,10 @@ const ASSISTANT_SYSTEM_INSTRUCTION = [
   'Sos el copiloto clínico de AD Clinic, una clínica dental de Paraguay.',
   'Recibís un comando dictado por el odontólogo y el contexto actual de la sesión.',
   'Tenés que elegir exactamente UNA herramienta del catálogo y devolver sus parámetros en JSON.',
+  '',
+  'Hay dos clases de herramientas:',
+  '- CONSULTAS (solo lectura): responden con datos reales de la base y no cambian de pantalla salvo que el doctor pida abrir algo.',
+  '- ACCIONES: abren una pantalla o modifican datos; las sensibles se confirman después en pantalla.',
   '',
   'Catálogo (campo action):',
   '- call_next_patient: llama a sala al siguiente paciente en espera o al paciente nombrado en patient_query.',
@@ -83,17 +89,29 @@ const ASSISTANT_SYSTEM_INSTRUCTION = [
   '- schedule_followup: crea una cita de control con date (YYYY-MM-DD), time (HH:MM de 24 h), duration_minutes (10-240), reason y send_whatsapp.',
   '- prepare_collection_or_invoice: abre Caja para cobrar (disposition: collection) o Facturación para emitir (disposition: invoice).',
   '- guided_workflow: guía paso a paso la consulta (guided_command: start | next | close).',
+  '- query_clinic_summary: resumen del día (citas, pacientes en sala, cobrado hoy y facturas emitidas hoy).',
+  '- query_appointments: agenda de hoy, mañana o de una fecha (date: YYYY-MM-DD); con staff_query filtra por profesional.',
+  '- query_patient_info: teléfono, documento o RUC, saldo y último movimiento del paciente (patient_query).',
+  '- query_treatment_catalog: precio en guaraníes y duración de tratamientos (treatment_query con el nombre o la categoría).',
+  '- query_cash_summary: cobros de hoy y del mes, total pendiente y pacientes con deuda.',
+  '- query_invoices_summary: facturas emitidas hoy y facturas pendientes de cobro.',
+  '- query_team: personal activo del consultorio y sus roles.',
+  '- send_whatsapp_reminder: envía por WhatsApp el recordatorio de la próxima cita del paciente (patient_query).',
+  '- lookup_ruc_dnit: consulta un RUC paraguayo en Tu RUC (ruc con dígito verificador, por ejemplo 3870633-4).',
+  '- navigate_to: abre una sección del menú (navigation_target: dashboard | patients | appointments | treatments | odontogram | cash | invoicing | team | tv).',
   '- none: el comando no corresponde a ninguna herramienta.',
   '',
   'Reglas:',
   '1. Respondé en español rioplatense/paraguayo, con voseo, en una o dos frases de menos de 40 palabras.',
   '2. El campo reply se lee en voz alta: sin listas, sin markdown, sin números de factura inventados.',
-  '3. Nunca inventes datos clínicos ni financieros: usá solo el contexto recibido.',
-  '4. Las acciones que llaman pacientes, agendan o cambian el presupuesto se confirman después en pantalla: escribí el reply sin afirmar que ya se ejecutaron.',
+  '3. Nunca inventes datos clínicos ni financieros: si el dato no está en el contexto, elegí la consulta que lo trae de la base.',
+  '4. Las acciones que llaman pacientes, agendan, cambian el presupuesto o envían WhatsApp se confirman después en pantalla: escribí el reply sin afirmar que ya se ejecutaron.',
   '5. Si el doctor dice «este paciente» usá activePatient; si nombra a otro, copiá el nombre en patient_query.',
-  '6. Si falta el paciente y la acción lo necesita, dejá patient_query vacío: la aplicación pide la ficha.',
+  '6. Si falta el paciente y la acción lo necesita, dejá patient_query vacío: la aplicación pide la ficha. Para fechas relativas calculá date en formato YYYY-MM-DD usando today.',
   '7. Para odontogram_action usá notación FDI (11-48 permanente, 51-85 temporal) y surface solo si se menciona una cara.',
   '8. Si el comando es ambiguo o no es una acción clínica, usá none y explicá en una frase qué podés hacer.',
+  '9. Para responder un dato usá la consulta correspondiente y no navegues: navigate_to es solo para «abrí la caja», «andá a la agenda», etc.',
+  '10. Si el doctor pide solo información, no propongas acciones ni confirmaciones.',
 ].join('\n')
 
 const ASSISTANT_INTENT_SCHEMA: Record<string, unknown> = {
@@ -111,11 +129,30 @@ const ASSISTANT_INTENT_SCHEMA: Record<string, unknown> = {
         'schedule_followup',
         'prepare_collection_or_invoice',
         'guided_workflow',
+        'query_clinic_summary',
+        'query_appointments',
+        'query_patient_info',
+        'query_treatment_catalog',
+        'query_cash_summary',
+        'query_invoices_summary',
+        'query_team',
+        'send_whatsapp_reminder',
+        'lookup_ruc_dnit',
+        'navigate_to',
       ],
     },
     reply: { type: 'STRING' },
     patient_query: { type: 'STRING', nullable: true },
     open_target: { type: 'STRING', enum: ['patients', 'odontogram'], nullable: true },
+    date: { type: 'STRING', nullable: true },
+    treatment_query: { type: 'STRING', nullable: true },
+    staff_query: { type: 'STRING', nullable: true },
+    navigation_target: {
+      type: 'STRING',
+      enum: ASSISTANT_NAVIGATION_TARGETS,
+      nullable: true,
+    },
+    ruc: { type: 'STRING', nullable: true },
     odontogram: {
       type: 'OBJECT',
       nullable: true,
@@ -192,6 +229,16 @@ const ACTIONS: AssistantActionType[] = [
   'schedule_followup',
   'prepare_collection_or_invoice',
   'guided_workflow',
+  'query_clinic_summary',
+  'query_appointments',
+  'query_patient_info',
+  'query_treatment_catalog',
+  'query_cash_summary',
+  'query_invoices_summary',
+  'query_team',
+  'send_whatsapp_reminder',
+  'lookup_ruc_dnit',
+  'navigate_to',
 ]
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -224,6 +271,24 @@ function asDisposition(value: unknown): AssistantDisposition | null {
 
 function asGuidedCommand(value: unknown): AssistantGuidedCommand | null {
   return value === 'start' || value === 'next' || value === 'close' ? value : null
+}
+
+function asNavigationTarget(value: unknown): AssistantNavigationTarget | null {
+  return typeof value === 'string' &&
+    ASSISTANT_NAVIGATION_TARGETS.includes(value as AssistantNavigationTarget)
+    ? (value as AssistantNavigationTarget)
+    : null
+}
+
+/** RUC dicho o escrito: se conservan dígitos y guion, con un tope de 15. */
+function asRuc(value: unknown): string | null {
+  const text = asText(value, 20)
+
+  if (!text) return null
+
+  const digits = text.replace(/[^\d-]/g, '')
+
+  return digits.replace(/-/g, '').length >= 6 ? digits.slice(0, 15) : null
 }
 
 /** Pieza FDI válida: 11-48 (permanente) o 51-85 (temporal). */
@@ -347,8 +412,28 @@ export function defaultAssistantReply(action: AssistantActionType): string {
       return 'Abro el circuito de cobro.'
     case 'guided_workflow':
       return 'Arrancamos la guía de consulta.'
+    case 'query_clinic_summary':
+      return 'Reviso el resumen del día.'
+    case 'query_appointments':
+      return 'Reviso la agenda.'
+    case 'query_patient_info':
+      return 'Busco los datos del paciente.'
+    case 'query_treatment_catalog':
+      return 'Busco el precio en el catálogo.'
+    case 'query_cash_summary':
+      return 'Reviso la caja del día.'
+    case 'query_invoices_summary':
+      return 'Reviso las facturas.'
+    case 'query_team':
+      return 'Reviso el equipo del consultorio.'
+    case 'send_whatsapp_reminder':
+      return 'Preparo el recordatorio de WhatsApp.'
+    case 'lookup_ruc_dnit':
+      return 'Consulto el RUC en Tu RUC.'
+    case 'navigate_to':
+      return 'Abro la sección.'
     default:
-      return 'Decime si querés llamar al siguiente paciente, leer alertas o consultar el estado de cuenta.'
+      return 'Puedo consultar la agenda, la caja, las facturas, el catálogo o los datos de un paciente, y también llamar al siguiente o abrir una sección.'
   }
 }
 
@@ -378,6 +463,11 @@ export function normalizeAssistantIntent(raw: unknown): AssistantIntent | null {
         : null,
     guidedCommand:
       action === 'guided_workflow' ? (asGuidedCommand(record.guided_command) ?? 'start') : null,
+    date: asDateKey(record.date),
+    treatmentQuery: asText(record.treatment_query, 80),
+    staffQuery: asText(record.staff_query, 80),
+    navigationTarget: action === 'navigate_to' ? asNavigationTarget(record.navigation_target) : null,
+    ruc: action === 'lookup_ruc_dnit' ? asRuc(record.ruc) : null,
   }
 
   if (action === 'odontogram_action' && !intent.odontogram) return null
@@ -410,6 +500,57 @@ const FOLLOWUP = /\b(agendar|agenda|reagendar|control|turno|proxima|cita)\b/
 const ODONTOGRAM_OPEN = /\b(abrir|abri|abre|mostrar|mostra|odontograma)\b/
 const PATIENT_OPEN = /\b(abrir|abri|abre|buscar|busca|ficha)\b/
 const HELP = /\b(ayuda|que podes hacer|comandos|opciones|como funciona)\b/
+
+/** «Abrí la caja», «andá a la agenda»: navegación pura, sin paciente. */
+const NAVIGATE =
+  /^(?:abri|abrime|abre|abrir|mostra|mostrame|mostrar|ir a|anda a|vamos a|llevame a|pantalla de)\s+(?:la |el |al )?(dashboard|inicio|pacientes|citas|agenda|tratamientos|catalogo|odontograma|caja|facturacion|equipo|tv|sala|pantalla)\s*$/
+
+const NAVIGATION_WORDS: Record<string, AssistantNavigationTarget> = {
+  dashboard: 'dashboard',
+  inicio: 'dashboard',
+  pacientes: 'patients',
+  citas: 'appointments',
+  agenda: 'appointments',
+  tratamientos: 'treatments',
+  catalogo: 'treatments',
+  odontograma: 'odontogram',
+  caja: 'cash',
+  facturacion: 'invoicing',
+  equipo: 'team',
+  tv: 'tv',
+  sala: 'tv',
+  pantalla: 'tv',
+}
+
+const NAVIGATION_LABELS: Record<AssistantNavigationTarget, string> = {
+  dashboard: 'el dashboard',
+  patients: 'Pacientes',
+  appointments: 'la agenda',
+  treatments: 'el catálogo de tratamientos',
+  odontogram: 'el odontograma',
+  cash: 'Caja',
+  invoicing: 'Facturación',
+  team: 'el equipo',
+  tv: 'la pantalla de sala',
+}
+
+const CASH_QUERY =
+  /\b(caja de hoy|saldo de caja|saldo del dia|caja del dia|cobramos hoy|cobrado hoy|cobros de hoy|resumen de caja|movimientos de hoy|cuanto cobramos|cuanto hay en caja|pendiente de caja|como va la caja|como viene la caja|como esta la caja|estado de caja|balance de caja)\b/
+const INVOICES_QUERY =
+  /\b(facturas emitidas|facturas pendientes|facturas impagas|facturas de hoy|cuantas facturas|facturacion de hoy|saldo de facturas)\b/
+const SUMMARY =
+  /\b(resumen|panorama|como va el dia|como viene el dia|resumen del dia|balance del dia)\b/
+const AGENDA_QUERY =
+  /\b(cuantas (citas|consultas|turnos)|que (citas|turnos|consultas) (hay|tenemos)|agenda (de|del) (hoy|manana|dia|lunes|martes|miercoles|jueves|viernes|sabado|domingo)|citas (de|del) (hoy|manana|lunes|martes|miercoles|jueves|viernes|sabado|domingo)|agenda del dia)\b/
+const TREATMENT_QUERY =
+  /\b(cuanto (sale|cuesta|salen|cuestan|esta)|precio (de|del)|precios de|cuanto cobra|duracion (de|del))\b/
+const PATIENT_INFO =
+  /\b(telefono|celular|numero de contacto|documento|cedula|datos (de|del)|ultima visita|contacto del paciente)\b/
+const TEAM_QUERY = /\b(equipo|odontologos|personal|staff|quien atiende|quienes trabajan|los doctores)\b/
+const WHATSAPP_REMINDER =
+  /\b(recordatorio|recordatorios|recordale|mandale|enviale|avisale)\b|\b(manda|mandar|envia|enviar|avisa|avisar)\b.*\bwhatsapp\b/
+/** Verbos de agenda: si el doctor pide crear una cita, manda `schedule_followup`. */
+const SCHEDULING = /\b(agendar|agenda|reagendar|reagenda|crear|crea|programar|programa)\b/
 
 /** Minúsculas, sin tildes ni signos: los patrones se escriben en ASCII. */
 function normalizeCommand(text: string): string {
@@ -533,6 +674,11 @@ function localIntent(
     followup: null,
     disposition: null,
     guidedCommand: null,
+    date: null,
+    treatmentQuery: null,
+    staffQuery: null,
+    navigationTarget: null,
+    ruc: null,
     ...extra,
   }
 }
@@ -542,6 +688,61 @@ function extractPatientQuery(normalized: string): string | null {
   const cleaned = normalized
     .replace(
       /\b(abrir|abri|abre|buscar|busca|ficha|de|del|el|la|los|las|al|paciente|odontograma|mostrar|mostra|por|favor)\b/g,
+      ' ',
+    )
+    .replace(/\s+/g, ' ')
+    .trim()
+
+  return cleaned.length >= 3 ? cleaned : null
+}
+
+/** Quita las palabras de relleno del pedido de datos (teléfono, documento…). */
+function extractPatientInfoQuery(normalized: string): string | null {
+  const cleaned = normalized
+    .replace(
+      /\b(cual|cuales|que|quien|es|son|esta|estan|telefono|celular|numero|contacto|documento|cedula|datos|ficha|paciente|del|de|la|el|los|las|dame|decime|pasame|pasas|por|favor|mostra|mostrar|abrir|abri|buscar|busca|necesito|quiero|saber|sabes|ultima|visita|ruc)\b/g,
+      ' ',
+    )
+    .replace(/\s+/g, ' ')
+    .trim()
+
+  return cleaned.length >= 3 ? cleaned : null
+}
+
+/** Nombre del profesional mencionado al final («agenda de hoy del doctor Ríos»). */
+function extractStaffQuery(normalized: string): string | null {
+  const match = /\b(?:del|de|con)\s+(?:la |el )?(?:doctor|doctora|dr|dra)\s+([a-z ]+)$/.exec(
+    normalized,
+  )
+
+  if (!match) return null
+
+  const name = match[1]
+    .replace(/\b(de|del|la|el)\b/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+
+  return name.length >= 3 ? name : null
+}
+
+/** Procedimiento o categoría pedida («cuánto sale una endodoncia»). */
+function extractTreatmentQuery(normalized: string): string | null {
+  const cleaned = normalized
+    .replace(
+      /\b(cual|cuales|que|es|son|cuanto|sale|cuesta|salen|cuestan|esta|precio|precios|de|del|la|el|los|las|un|una|tratamiento|tratamientos|catalogo|buscar|busca|mostra|mostrame|mostrar|cobras|cobran|duracion|dura|y|en|guaranies|gs)\b/g,
+      ' ',
+    )
+    .replace(/\s+/g, ' ')
+    .trim()
+
+  return cleaned.length >= 3 ? cleaned : null
+}
+
+/** Paciente de un recordatorio («mandale el recordatorio a Juan»). */
+function extractReminderQuery(normalized: string): string | null {
+  const cleaned = normalized
+    .replace(
+      /\b(manda|mandale|mandarle|mandar|envia|enviale|enviarle|enviar|avisa|avisale|avisarle|avisar|recordatorio|recordatorios|recordale|recordar|por|whatsapp|un|una|el|la|los|las|de|del|al|a|paciente|su|proximo|proxima|cita|turno|podes|puedes|me|le)\b/g,
       ' ',
     )
     .replace(/\s+/g, ' ')
@@ -567,7 +768,7 @@ export function parseDoctorCommandLocally(
   if (HELP.test(normalized)) {
     return localIntent(
       'none',
-      'Puedo llamar al siguiente paciente, abrir una ficha, leer alertas médicas, dictar un hallazgo, agendar un control, cobrar el plan o emitir la factura. Decime cómo te ayudo.',
+      'Puedo consultar la agenda, la caja, las facturas, el catálogo, los datos de un paciente o el equipo. También llamar al siguiente, abrir una ficha, leer alertas, dictar un hallazgo, agendar un control, cobrar o emitir factura. Decime cómo te ayudo.',
     )
   }
 
@@ -587,6 +788,79 @@ export function parseDoctorCommandLocally(
     return localIntent('guided_workflow', 'Paso al siguiente punto de la guía.', {
       guidedCommand: 'next',
     })
+  }
+
+  const navigationMatch = NAVIGATE.exec(normalized)
+
+  if (navigationMatch) {
+    const target = NAVIGATION_WORDS[navigationMatch[1]]
+
+    if (target) {
+      return localIntent('navigate_to', `Abro ${NAVIGATION_LABELS[target]}.`, {
+        navigationTarget: target,
+      })
+    }
+  }
+
+  if (WHATSAPP_REMINDER.test(normalized) && !SCHEDULING.test(normalized)) {
+    return localIntent(
+      'send_whatsapp_reminder',
+      'Preparo el recordatorio de WhatsApp para confirmarlo.',
+      { patientQuery: extractReminderQuery(normalized) },
+    )
+  }
+
+  // RUC con dígitos (la consulta a Tu RUC necesita base y verificador).
+  if (/\bruc\b/.test(normalized) && /\d{6,}/.test(normalized.replace(/\s+/g, ''))) {
+    return localIntent('lookup_ruc_dnit', 'Consulto el RUC en Tu RUC.', {
+      ruc: normalized.replace(/[^\d]/g, ''),
+    })
+  }
+
+  if (CASH_QUERY.test(normalized)) {
+    return localIntent('query_cash_summary', 'Reviso la caja del día.')
+  }
+
+  if (INVOICES_QUERY.test(normalized)) {
+    return localIntent('query_invoices_summary', 'Reviso las facturas.')
+  }
+
+  if (SUMMARY.test(normalized)) {
+    return localIntent('query_clinic_summary', 'Reviso el resumen del día.')
+  }
+
+  if (AGENDA_QUERY.test(normalized)) {
+    const date = resolveLocalDate(normalized, context.today)
+
+    return localIntent(
+      'query_appointments',
+      date ? 'Reviso la agenda de ese día.' : 'Reviso la agenda de hoy.',
+      { date, staffQuery: extractStaffQuery(normalized) },
+    )
+  }
+
+  if (TREATMENT_QUERY.test(normalized)) {
+    const treatmentQuery = extractTreatmentQuery(normalized)
+
+    return localIntent(
+      'query_treatment_catalog',
+      treatmentQuery ? `Busco el precio de ${treatmentQuery}.` : 'Reviso el catálogo de tratamientos.',
+      { treatmentQuery },
+    )
+  }
+
+  if (TEAM_QUERY.test(normalized)) {
+    return localIntent('query_team', 'Reviso el equipo del consultorio.')
+  }
+
+  if (PATIENT_INFO.test(normalized)) {
+    return localIntent(
+      'query_patient_info',
+      context.activePatient
+        ? `Reviso los datos de ${context.activePatient.name}.`
+        : 'Busco los datos del paciente.',
+      { patientQuery: extractPatientInfoQuery(normalized) },
+    )
   }
 
   if (INVOICE.test(normalized)) {

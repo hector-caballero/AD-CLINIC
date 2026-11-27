@@ -7,17 +7,46 @@
  *
  * Reglas:
  * - Una sola locución a la vez: al pedir una nueva se cancela la anterior (el
- *   doctor puede interrumpir con `Alt + V` y el micrófono vuelve a escuchar).
+ *   doctor puede interrumpir y el micrófono vuelve a escuchar).
+ * - Half-duplex: el proveedor corta el micrófono antes de hablar y lo retoma
+ *   `ASSISTANT_SPEECH_RESUME_DELAY_MS` después de `onEnd`, así el copiloto
+ *   nunca se escucha a sí mismo ni habla encima del doctor.
+ * - Cada locución tiene un token de generación: cuando se cancela, el `onEnd`
+ *   viejo se descarta y no puede reactivar el micrófono por detrás.
  * - `speakAssistant` devuelve `false` si el navegador no puede hablar o si el
  *   interruptor de voz está apagado en el contexto; nunca lanza.
  */
 
 const SPEECH_LANG_CANDIDATES = ['es-py', 'es-es', 'es-ar', 'es-mx', 'es']
 
+/**
+ * Espera después de `utterance.onend` antes de reactivar el micrófono.
+ * Chrome tarda unos milisegundos en soltar el altavoz; si se escucha antes,
+ * el dictado captura la última sílaba del propio copiloto.
+ */
+export const ASSISTANT_SPEECH_RESUME_DELAY_MS = 350
+
 let activeUtterance: SpeechSynthesisUtterance | null = null
+
+/**
+ * Token de la locución vigente. `stopAssistantSpeech()` lo incrementa para que
+ * los callbacks de una locución cancelada no se disparen.
+ */
+let generation = 0
 
 export function isAssistantSpeechSupported(): boolean {
   return typeof window !== 'undefined' && 'speechSynthesis' in window
+}
+
+/** `true` mientras el motor de síntesis está emitiendo audio. */
+export function isAssistantSpeaking(): boolean {
+  if (!isAssistantSpeechSupported()) return false
+
+  try {
+    return window.speechSynthesis.speaking
+  } catch {
+    return false
+  }
 }
 
 function pickSpanishVoice(): SpeechSynthesisVoice | null {
@@ -38,6 +67,8 @@ function pickSpanishVoice(): SpeechSynthesisVoice | null {
 export function stopAssistantSpeech(): void {
   if (!isAssistantSpeechSupported()) return
 
+  // Invalida los callbacks de la locución que se está cortando.
+  generation += 1
   activeUtterance = null
 
   try {
@@ -69,6 +100,10 @@ export function speakAssistant(
 
   stopAssistantSpeech()
 
+  // La cancelación de arriba incrementa la generación: este token identifica
+  // la locución nueva y descarta los callbacks de la anterior.
+  const token = generation
+
   try {
     const utterance = new SpeechSynthesisUtterance(content)
     const voice = pickSpanishVoice()
@@ -86,12 +121,18 @@ export function speakAssistant(
 
       finished = true
 
+      // Locución cancelada: no se avisa el final para que el proveedor no
+      // reactive el micrófono encima de la locución que la reemplazó.
+      if (token !== generation) return
+
       if (activeUtterance === utterance) activeUtterance = null
 
       handlers.onEnd?.()
     }
 
-    utterance.onstart = () => handlers.onStart?.()
+    utterance.onstart = () => {
+      if (token === generation) handlers.onStart?.()
+    }
     utterance.onend = finish
     utterance.onerror = finish
 

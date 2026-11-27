@@ -10,6 +10,10 @@
  * - **Odontograma** (`createOdontogramDictation` en
  *   `features/odontogram/odontogram-voice-service.ts`): comandos cortos, uno
  *   por frase (`onPhrase`), que se registran en cuanto se cierran.
+ * - **Copiloto clínico** (`DoctorAssistantProvider`): comandos largos dichos
+ *   con pausas para pensar. Pide `silenceMs` para acumular los tramos
+ *   confirmados y entregar la frase completa recién después de ese silencio
+ *   (o cuando el doctor dice «listo» y el proveedor llama a `flush()`).
  *
  * `lib.dom` todavía no declara `SpeechRecognition`, así que acá se describe
  * solo lo que se usa. Chrome, Edge y Safari lo exponen con prefijo `webkit`.
@@ -99,6 +103,22 @@ export type SpeechDictation = {
   dispose: () => void
   /** Descarta el texto acumulado para empezar un dictado nuevo. */
   reset: () => void
+  /**
+   * Entrega ya el texto que está esperando la ventana de silencio (el doctor
+   * dijo «listo» / «ejecutar»). No hace nada si no hay texto pendiente.
+   */
+  flush: () => void
+}
+
+export type SpeechDictationOptions = {
+  /**
+   * Ventana de silencio (ms) antes de entregar la frase acumulada.
+   *
+   * Con `0` (u omitido) cada tramo final se entrega al instante, que es lo que
+   * esperan el odontograma y la anamnesis. El copiloto usa `2000` para no
+   * cortar el comando cuando el doctor hace una pausa.
+   */
+  silenceMs?: number
 }
 
 
@@ -111,7 +131,10 @@ export type SpeechDictation = {
  *
  * Lanza `SpeechDictationError` si el navegador no soporta la API.
  */
-export function createSpeechDictation(handlers: SpeechDictationHandlers): SpeechDictation {
+export function createSpeechDictation(
+  handlers: SpeechDictationHandlers,
+  options: SpeechDictationOptions = {},
+): SpeechDictation {
   const Recognition = getSpeechRecognition()
 
   if (!Recognition) {
@@ -124,8 +147,12 @@ export function createSpeechDictation(handlers: SpeechDictationHandlers): Speech
   recognition.interimResults = true
   recognition.maxAlternatives = 1
 
+  const silenceMs = Math.max(0, Math.round(options.silenceMs ?? 0))
+
   let finalText = ''
   let interimText = ''
+  let pendingPhrase = ''
+  let silenceTimer: ReturnType<typeof setTimeout> | null = null
   let shouldListen = false
   let disposed = false
 
@@ -133,7 +160,61 @@ export function createSpeechDictation(handlers: SpeechDictationHandlers): Speech
     if (!disposed) handlers.onTranscript?.(finalText, interimText)
   }
 
+  const clearSilenceTimer = () => {
+    if (silenceTimer === null) return
+
+    clearTimeout(silenceTimer)
+    silenceTimer = null
+  }
+
+  /**
+   * Entrega la frase acumulada. Se llama al vencer la ventana de silencio o
+   * cuando el doctor pide ejecutar; el buffer se vacía siempre para que el
+   * próximo comando arranque limpio.
+   */
+  const flushPending = () => {
+    clearSilenceTimer()
+
+    const phrase = pendingPhrase
+
+    pendingPhrase = ''
+
+    if (disposed || !phrase) return
+
+    if (silenceMs > 0) {
+      // El texto ya se entregó: se limpia el transcript visible para que la
+      // próxima orden no arrastre la anterior.
+      finalText = ''
+      interimText = ''
+      emitTranscript()
+    }
+
+    handlers.onPhrase?.(phrase)
+  }
+
+  const scheduleFlush = () => {
+    if (silenceMs <= 0) return
+
+    clearSilenceTimer()
+    silenceTimer = setTimeout(flushPending, silenceMs)
+  }
+
+  const appendPhrase = (phrase: string) => {
+    if (silenceMs <= 0) {
+      handlers.onPhrase?.(phrase)
+
+      return
+    }
+
+    pendingPhrase = `${pendingPhrase} ${phrase}`.replace(/\s+/g, ' ').trim()
+    scheduleFlush()
+  }
+
   recognition.onresult = (event) => {
+    // Después de `stop()` pueden llegar resultados tardíos del motor: se
+    // descartan para que no se ejecute un comando que el doctor ya cortó.
+    if (disposed || !shouldListen) return
+
     let interim = ''
     let phrase = ''
 
@@ -152,7 +233,14 @@ export function createSpeechDictation(handlers: SpeechDictationHandlers): Speech
     interimText = interim
     emitTranscript()
 
-    if (phrase && !disposed) handlers.onPhrase?.(phrase)
+    if (phrase) {
+      appendPhrase(phrase)
+
+      return
+    }
+
+    // Cada palabra provisoria corre la ventana: el doctor sigue hablando.
+    if (silenceMs > 0 && pendingPhrase) scheduleFlush()
   }
 
   recognition.onerror = (event) => {
@@ -219,6 +307,8 @@ export function createSpeechDictation(handlers: SpeechDictationHandlers): Speech
     stop: () => {
       shouldListen = false
       interimText = ''
+      pendingPhrase = ''
+      clearSilenceTimer()
 
       try {
         recognition.stop()
@@ -231,6 +321,8 @@ export function createSpeechDictation(handlers: SpeechDictationHandlers): Speech
     dispose: () => {
       disposed = true
       shouldListen = false
+      pendingPhrase = ''
+      clearSilenceTimer()
 
       try {
         recognition.abort()
@@ -241,6 +333,9 @@ export function createSpeechDictation(handlers: SpeechDictationHandlers): Speech
     reset: () => {
       finalText = ''
       interimText = ''
+      pendingPhrase = ''
+      clearSilenceTimer()
     },
+    flush: flushPending,
   }
 }

@@ -38,6 +38,16 @@ export type DoctorAssistantValue = {
   totalGuidedSteps: number
   /** Interruptor de respuestas habladas (se recuerda en `localStorage`). */
   voiceFeedbackEnabled: boolean
+  /**
+   * «Modo tablet continuo» (se recuerda en `localStorage`): al terminar de
+   * hablar, el micrófono se reactiva solo para seguir dictando sin tocar nada.
+   */
+  continuousMode: boolean
+  /**
+   * Avance de la ventana de silencio (0 a 1) antes de enviar la frase dictada.
+   * `0` = no hay texto esperando; el dock dibuja la barra de los 2 segundos.
+   */
+  silenceProgress: number
   isSpeechSupported: boolean
   isAiConfigured: boolean
   openDock: () => void
@@ -46,11 +56,16 @@ export type DoctorAssistantValue = {
   startListening: () => void
   stopListening: () => void
   toggleListening: () => void
+  /** «Interrumpir y hablar»: corta la voz del copiloto y abre el micrófono. */
+  interruptSpeech: () => void
+  /** Corta solo la locución en curso (mantiene el interruptor de voz). */
+  silenceSpeech: () => void
   /** Ejecuta un comando escrito o dictado (lo usa el campo del dock). */
   submitCommand: (text: string) => void
   confirmPendingAction: () => void
   cancelPendingAction: () => void
   setVoiceFeedbackEnabled: (enabled: boolean) => void
+  setContinuousMode: (enabled: boolean) => void
   startGuidedWorkflow: () => void
   advanceGuidedWorkflow: () => void
   /** Sale del modo guía sin cambiar la consulta. */

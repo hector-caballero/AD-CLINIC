@@ -1,4 +1,4 @@
-import { formatPYG, formatShortDate } from '../../lib/format'
+import { formatPYG, formatPatientDocument, formatPhonePY, formatShortDate } from '../../lib/format'
 import {
   combineDateAndTime,
   findPatientConflicts,
@@ -13,10 +13,20 @@ import {
 import {
   callAppointmentToRoom,
   createAppointment,
+  fetchAppointments,
   fetchAppointmentsForDay,
+  fetchPatientAppointments,
+  markReminderSent,
 } from '../appointments/appointments-service'
 import { buildReminderUrl } from '../appointments/appointment-whatsapp'
-import { fetchPatientTransactionLinks, type PatientTransactionLink } from '../cash/cash-service'
+import { addDays, startOfLocalDay, toDateKey } from '../cash/cash-dates'
+import { computeCashMetrics } from '../cash/cash-metrics'
+import {
+  fetchCashOverview,
+  fetchPatientAccount,
+  fetchPatientTransactionLinks,
+  type PatientTransactionLink,
+} from '../cash/cash-service'
 import { filterTreatmentOptions } from '../odontogram/odontogram-catalog'
 import { buildPlanFinancials, type PlanFinancialSummary } from '../odontogram/odontogram-financials'
 import { addOdontogramItem, fetchOdontogram } from '../odontogram/odontogram-service'
@@ -29,6 +39,7 @@ import {
   type OdontogramVoiceCommand,
 } from '../odontogram/odontogram-voice-service'
 import {
+  fetchInvoices,
   fetchPatientInvoices,
   fetchTransactionInvoicing,
   type TransactionInvoicing,
@@ -36,12 +47,16 @@ import {
 import { fetchMedicalHistory } from '../patients/anamnesis-service'
 import { getPatientFullName, type Patient } from '../patients/patient-types'
 import { fetchPatients } from '../patients/patients-service'
+import { fetchStaffDirectory } from '../team/staff-directory'
 import { fetchTreatments } from '../treatments/treatments-service'
 import { buildWaitingRoomSnapshot } from '../tv/tv-queue'
 import type { WaitingRoomEntry, WaitingRoomSnapshot } from '../tv/tv-types'
+import { lookupRucParaguay, isRucActivo } from '../../services/turuc-service'
+import { sendAppointmentReminder } from '../../services/whatsapp'
 import { notifyAssistantDataChange } from './assistant-events'
 import type {
   AssistantIntent,
+  AssistantNavigationTarget,
   AssistantReplyLink,
   AssistantReplyTone,
 } from './assistant-types'
@@ -682,6 +697,405 @@ async function executeOdontogramAction(
 }
 
 
+// --- Consultas de solo lectura -------------------------------------------------
+
+/** `YYYY-MM-DD` local de un instante ISO (las facturas se emiten en hora local). */
+function toLocalDateKey(value: string): string {
+  const date = new Date(value)
+
+  return Number.isNaN(date.getTime()) ? '' : toDateKey(date)
+}
+
+function formatCount(count: number, singular: string, plural: string): string {
+  return `${count} ${count === 1 ? singular : plural}`
+}
+
+/** Texto corto y legible en voz alta: «10:00 Ana Benítez». */
+function describeAppointment(appointment: AppointmentWithPatient): string {
+  return `${formatAppointmentTime(appointment.starts_at)} ${getAppointmentPatientName(appointment)}`
+}
+
+function assistantErrorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error && error.message ? error.message : fallback
+}
+
+/** Resumen del día: agenda, sala, caja y facturas de hoy. */
+async function executeClinicSummary(
+  context: AssistantActionContext,
+): Promise<AssistantActionResult> {
+  const [room, overview, invoices] = await Promise.all([
+    context.room ?? fetchAssistantRoom(context.today),
+    fetchCashOverview(),
+    fetchInvoices(),
+  ])
+
+  const metrics = computeCashMetrics(overview)
+  const issuedToday = invoices.filter(
+    (invoice) => invoice.status === 'issued' && toLocalDateKey(invoice.issued_at) === context.today,
+  )
+  const issuedTotal = issuedToday.reduce((total, invoice) => total + invoice.total, 0)
+  const scheduled = room.appointments.filter(
+    (appointment) => appointment.status !== 'cancelled' && appointment.status !== 'no_show',
+  ).length
+  const waiting = room.snapshot.waiting.length
+  const next = room.snapshot.waiting[0]?.patientName ?? null
+
+  const agenda = [
+    `Hoy tenés ${formatCount(scheduled, 'cita', 'citas')}`,
+    waiting > 0
+      ? `${formatCount(waiting, 'paciente en sala', 'pacientes en sala')}${
+          next ? `, siguiente ${next}` : ''
+        }`
+      : 'sala vacía',
+  ]
+  const money = [
+    `cobrado ${formatPYG(metrics.collectedToday)} en ${formatCount(
+      metrics.paymentsToday,
+      'pago',
+      'pagos',
+    )}`,
+    issuedToday.length > 0
+      ? `${formatCount(issuedToday.length, 'factura emitida', 'facturas emitidas')} por ${formatPYG(
+          issuedTotal,
+        )}`
+      : 'sin facturas emitidas',
+  ]
+
+  return result('info', `${agenda.join(', ')}. ${money.join(', ')}.`)
+}
+
+/** Agenda de un día (hoy por defecto), opcionalmente filtrada por profesional. */
+async function executeQueryAppointments(
+  intent: AssistantIntent,
+  context: AssistantActionContext,
+): Promise<AssistantActionResult> {
+  const date = intent.date ?? context.today
+  const appointments =
+    date === context.today && context.room
+      ? context.room.appointments
+      : await fetchAppointmentsForDay(date)
+
+  const active = appointments.filter(
+    (appointment) => appointment.status !== 'cancelled' && appointment.status !== 'no_show',
+  )
+
+  if (active.length === 0) {
+    return result(
+      'info',
+      `No hay citas cargadas para el ${formatShortDate(date)}${
+        intent.staffQuery ? ' con ese profesional' : ''
+      }.`,
+    )
+  }
+
+  let filtered = active
+
+  if (intent.staffQuery) {
+    const directory = await fetchStaffDirectory()
+    const term = normalizeTerm(intent.staffQuery)
+    const ids = new Set(
+      directory
+        .filter((member) => normalizeTerm(member.full_name).includes(term))
+        .map((member) => member.id),
+    )
+
+    filtered = active.filter(
+      (appointment) => appointment.dentist_id !== null && ids.has(appointment.dentist_id),
+    )
+
+    if (filtered.length === 0) {
+      return result(
+        'warning',
+        `No encontré a ${intent.staffQuery} en el equipo o no tiene citas ese día.`,
+      )
+    }
+  }
+
+  const list = filtered.slice(0, 4).map(describeAppointment).join(', ')
+  const more = filtered.length > 4 ? ` y ${filtered.length - 4} más` : ''
+  const who = intent.staffQuery ? ` de ${intent.staffQuery}` : ''
+
+  return result(
+    'info',
+    `Agenda${who} del ${formatShortDate(date)}: ${formatCount(
+      filtered.length,
+      'cita',
+      'citas',
+    )}. ${list}${more}.`,
+  )
+}
+
+
+/** Teléfono, documento, saldo y último movimiento del paciente. */
+async function executeQueryPatientInfo(
+  intent: AssistantIntent,
+  context: AssistantActionContext,
+): Promise<AssistantActionResult> {
+  const { patient, message } = await resolveAssistantPatient(
+    intent.patientQuery,
+    context.activePatient,
+  )
+
+  if (!patient) return result('warning', message ?? 'No pude identificar al paciente.')
+
+  const name = getPatientFullName(patient)
+  const [account, visits] = await Promise.all([
+    fetchPatientAccount(patient.id),
+    fetchPatientAppointments(patient.id, 8).catch(() => []),
+  ])
+  const document = formatPatientDocument(patient.document_type, patient.document_number)
+  const phone = patient.phone ? formatPhonePY(patient.phone) : 'sin teléfono'
+  const balance = account.balance?.balance ?? 0
+  const lastCompleted = visits.find((appointment) => appointment.status === 'completed') ?? null
+  const lastMovement = account.movements[0]?.created_at ?? null
+  const lastVisit = lastCompleted
+    ? `última visita el ${formatShortDate(lastCompleted.starts_at)}`
+    : lastMovement
+      ? `último movimiento el ${formatShortDate(lastMovement)}`
+      : 'sin visitas registradas'
+
+  const parts = [
+    name,
+    document,
+    phone,
+    balance > 0 ? `saldo ${formatPYG(balance)}` : 'sin saldo pendiente',
+    lastVisit,
+  ]
+
+  if (patient.legal_name && patient.legal_name.trim() !== name) {
+    parts.push(`factura a ${patient.legal_name.trim()}`)
+  }
+
+  return result('info', `${parts.join(' · ')}.`, { patient })
+}
+
+/** Busca precio y duración en el catálogo de tratamientos. */
+async function executeTreatmentCatalog(intent: AssistantIntent): Promise<AssistantActionResult> {
+  const query = intent.treatmentQuery?.trim() ?? ''
+  const { treatments } = await fetchTreatments()
+  const matches = filterTreatmentOptions(treatments, query)
+
+  if (matches.length === 0) {
+    return result(
+      'warning',
+      query
+        ? `No encontré «${query}» en el catálogo. Probá con el nombre del procedimiento o la categoría.`
+        : 'Decime qué tratamiento querés consultar, por ejemplo «cuánto sale una endodoncia».',
+    )
+  }
+
+  const list = matches
+    .slice(0, 3)
+    .map((option) => {
+      const duration = option.default_duration_minutes
+        ? ` en ${option.default_duration_minutes} minutos`
+        : ''
+
+      return `${option.name}: ${formatPYG(option.default_price)}${duration}`
+    })
+    .join('; ')
+  const more = matches.length > 3 ? ` y ${matches.length - 3} más` : ''
+
+  return result('info', `${list}${more}.`)
+}
+
+/** Cobros y saldos del día y del mes. */
+async function executeCashSummary(): Promise<AssistantActionResult> {
+  const overview = await fetchCashOverview()
+  const metrics = computeCashMetrics(overview)
+
+  const parts = [
+    `Hoy cobraste ${formatPYG(metrics.collectedToday)} en ${formatCount(
+      metrics.paymentsToday,
+      'pago',
+      'pagos',
+    )}`,
+    `este mes ${formatPYG(metrics.collectedMonth)}`,
+    metrics.pendingTotal > 0
+      ? `pendiente ${formatPYG(metrics.pendingTotal)} con ${formatCount(
+          metrics.debtors,
+          'paciente',
+          'pacientes',
+        )}`
+      : 'sin saldos pendientes',
+  ]
+
+  return result('info', `${parts.join(' · ')}.`)
+}
+
+/** Facturas emitidas hoy y facturas con saldo pendiente. */
+async function executeInvoicesSummary(
+  context: AssistantActionContext,
+): Promise<AssistantActionResult> {
+  const invoices = await fetchInvoices()
+  const issued = invoices.filter((invoice) => invoice.status === 'issued')
+  const todayInvoices = issued.filter(
+    (invoice) => toLocalDateKey(invoice.issued_at) === context.today,
+  )
+  const pending = issued.filter((invoice) => invoice.payment_status !== 'paid')
+  const pendingBalance = pending.reduce(
+    (total, invoice) => total + Math.max(0, invoice.balance),
+    0,
+  )
+
+  const parts = [
+    todayInvoices.length > 0
+      ? `hoy emitiste ${formatCount(todayInvoices.length, 'factura', 'facturas')} por ${formatPYG(
+          todayInvoices.reduce((total, invoice) => total + invoice.total, 0),
+        )}`
+      : 'hoy no se emitió ninguna factura',
+    pending.length > 0
+      ? `${formatCount(pending.length, 'factura pendiente', 'facturas pendientes')} por ${formatPYG(
+          pendingBalance,
+        )}`
+      : 'no hay facturas pendientes de cobro',
+  ]
+
+  return result('info', `${parts.join(' · ')}.`)
+}
+
+/** Personal activo del consultorio (vista pública del directorio). */
+async function executeQueryTeam(): Promise<AssistantActionResult> {
+  const directory = await fetchStaffDirectory()
+
+  if (directory.length === 0) {
+    return result('warning', 'No pude leer el directorio del equipo del consultorio.')
+  }
+
+  const dentists = directory
+    .filter((member) => member.role === 'dentist')
+    .map((member) => member.full_name)
+  const admins = directory.filter((member) => member.role === 'admin').length
+  const reception = directory.filter((member) => member.role === 'receptionist').length
+
+  const parts = [
+    formatCount(directory.length, 'persona activa', 'personas activas'),
+    dentists.length > 0
+      ? `odontología: ${dentists.slice(0, 3).join(', ')}${dentists.length > 3 ? '…' : ''}`
+      : 'sin odontólogos cargados',
+    `administración ${admins} y recepción ${reception}`,
+  ]
+
+  return result('info', `${parts.join(' · ')}.`)
+}
+
+/** Estados de cita que todavía se pueden recordar por WhatsApp. */
+function isRemindableAppointment(appointment: AppointmentWithPatient): boolean {
+  return (
+    appointment.status === 'scheduled' ||
+    appointment.status === 'confirmed' ||
+    appointment.status === 'reschedule_requested' ||
+    appointment.status === 'checked_in'
+  )
+}
+
+/** Próxima cita del paciente dentro de los 7 días (incluye la de hoy). */
+async function findUpcomingAppointment(
+  patientId: string,
+): Promise<AppointmentWithPatient | null> {
+  const now = new Date()
+  const from = startOfLocalDay(now)
+  const to = addDays(from, 7)
+  const appointments = await fetchAppointments(from.toISOString(), to.toISOString())
+  const limit = now.getTime() - 60 * 60 * 1000
+
+  return (
+    appointments.find(
+      (appointment) =>
+        appointment.patient_id === patientId &&
+        isRemindableAppointment(appointment) &&
+        new Date(appointment.starts_at).getTime() >= limit,
+    ) ?? null
+  )
+}
+
+/** Envía por WhatsApp el recordatorio de la próxima cita del paciente. */
+async function executeWhatsAppReminder(
+  intent: AssistantIntent,
+  context: AssistantActionContext,
+): Promise<AssistantActionResult> {
+  const { patient, message } = await resolveAssistantPatient(
+    intent.patientQuery,
+    context.activePatient,
+  )
+
+  if (!patient) return result('warning', message ?? 'No pude identificar al paciente.')
+
+  const name = getPatientFullName(patient)
+  const appointment = await findUpcomingAppointment(patient.id)
+
+  if (!appointment) {
+    return result(
+      'warning',
+      `${name} no tiene una cita próxima para recordar. Agendá una primero y volvé a intentar.`,
+    )
+  }
+
+  try {
+    const sent = await sendAppointmentReminder(appointment, appointment.patient)
+
+    // La auditoría (`reminder_sent_at`) no bloquea el envío ya confirmado.
+    void markReminderSent(appointment.id).catch(() => undefined)
+    notifyAssistantDataChange({ scope: 'appointments', patientId: patient.id })
+
+    return result(
+      'success',
+      `Envié el recordatorio de ${name} al ${sent.number} para el ${formatShortDate(
+        appointment.starts_at,
+      )} a las ${formatAppointmentTime(appointment.starts_at)}.`,
+      { patient },
+    )
+  } catch (error) {
+    return result('warning', assistantErrorMessage(error, 'No pude enviar el recordatorio.'))
+  }
+}
+
+/** Consulta un RUC en Tu RUC (`turuc.com.py`). */
+async function executeRucLookup(intent: AssistantIntent): Promise<AssistantActionResult> {
+  if (!intent.ruc) {
+    return result('warning', 'Decime el RUC completo con dígito verificador, por ejemplo 3870633-4.')
+  }
+
+  try {
+    const data = await lookupRucParaguay(intent.ruc)
+    const status = isRucActivo(data) ? 'activo' : `en estado ${data.status.toLowerCase()}`
+    const kind = data.isCompany ? 'Persona jurídica' : 'Persona física'
+
+    return result('info', `RUC ${data.ruc}: ${data.name}, ${status}. ${kind}.`)
+  } catch (error) {
+    return result('warning', assistantErrorMessage(error, 'No pude consultar el RUC en Tu RUC.'))
+  }
+}
+
+/** Sección visible + ruta del menú para `navigate_to`. */
+const NAVIGATION_ROUTES: Record<AssistantNavigationTarget, { path: string; label: string }> = {
+  dashboard: { path: '/', label: 'el dashboard' },
+  patients: { path: '/pacientes', label: 'Pacientes' },
+  appointments: { path: '/citas', label: 'la agenda' },
+  treatments: { path: '/tratamientos', label: 'el catálogo de tratamientos' },
+  odontogram: { path: '/odontograma', label: 'el odontograma' },
+  cash: { path: '/caja', label: 'Caja' },
+  invoicing: { path: '/facturacion', label: 'Facturación' },
+  team: { path: '/equipo', label: 'el equipo' },
+  tv: { path: '/tv', label: 'la pantalla de sala' },
+}
+
+/** Navegación pura: abre una sección del menú sin tocar datos. */
+function executeNavigation(intent: AssistantIntent): AssistantActionResult {
+  const target = intent.navigationTarget
+
+  if (!target) {
+    return result(
+      'warning',
+      'Decime a qué sección querés ir: agenda, pacientes, caja, facturación, tratamientos, odontograma o equipo.',
+    )
+  }
+
+  const route = NAVIGATION_ROUTES[target]
+
+  return result('success', `Abro ${route.label}.`, { navigateTo: route.path })
+}
+
 // --- Tarjeta de confirmación ---------------------------------------------------
 
 /**
@@ -742,6 +1156,13 @@ export function describeAssistantConfirmation(
         } (${followup.durationMinutes} min) · ${followup.reason}.`,
       }
     }
+    case 'send_whatsapp_reminder':
+      return {
+        title: 'Enviar recordatorio por WhatsApp',
+        detail: `${
+          intent.patientQuery ?? patientName ?? 'El paciente'
+        } recibirá el recordatorio de su próxima cita. El mensaje sale desde el WhatsApp de la clínica.`,
+      }
     default:
       return { title: 'Confirmar acción', detail: intent.reply }
   }
@@ -768,6 +1189,26 @@ export async function executeAssistantIntent(
       return executeScheduleFollowup(intent, context)
     case 'prepare_collection_or_invoice':
       return executeCollectionOrInvoice(intent, context)
+    case 'query_clinic_summary':
+      return executeClinicSummary(context)
+    case 'query_appointments':
+      return executeQueryAppointments(intent, context)
+    case 'query_patient_info':
+      return executeQueryPatientInfo(intent, context)
+    case 'query_treatment_catalog':
+      return executeTreatmentCatalog(intent)
+    case 'query_cash_summary':
+      return executeCashSummary()
+    case 'query_invoices_summary':
+      return executeInvoicesSummary(context)
+    case 'query_team':
+      return executeQueryTeam()
+    case 'send_whatsapp_reminder':
+      return executeWhatsAppReminder(intent, context)
+    case 'lookup_ruc_dnit':
+      return executeRucLookup(intent)
+    case 'navigate_to':
+      return executeNavigation(intent)
     case 'guided_workflow':
       return result('info', intent.reply || 'Modo guía de consulta.')
     default:

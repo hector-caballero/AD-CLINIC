@@ -93,6 +93,38 @@ export function fetchAppointmentsForDay(dateKey: string): Promise<AppointmentWit
   return fetchAppointments(range.startIso, range.endIso)
 }
 
+/**
+ * Últimas citas del paciente, de la más nueva a la más vieja.
+ *
+ * Lo usa el copiloto clínico para responder «última visita» y para elegir la
+ * próxima cita al enviar un recordatorio. Se pide el paciente embebido igual
+ * que en la agenda para reutilizar la normalización y el recordatorio.
+ */
+export async function fetchPatientAppointments(
+  patientId: string,
+  limit = 8,
+): Promise<AppointmentWithPatient[]> {
+  const query = (select: string) =>
+    supabase
+      .from('appointments')
+      .select(select)
+      .eq('patient_id', patientId)
+      .order('starts_at', { ascending: false })
+      .limit(limit)
+
+  const { data, error } = await query(APPOINTMENT_SELECT)
+
+  if (!error) return asAppointments(data).map(normalizeAppointment)
+
+  if (!isMissingWaitingRoomColumn(error)) throw toAppointmentError(error)
+
+  const fallback = await query(APPOINTMENT_SELECT_LEGACY)
+
+  if (fallback.error) throw toAppointmentError(fallback.error)
+
+  return asAppointments(fallback.data).map(normalizeAppointment)
+}
+
 export async function createAppointment(input: AppointmentInput): Promise<AppointmentWithPatient> {
   const { data, error } = await supabase
     .from('appointments')

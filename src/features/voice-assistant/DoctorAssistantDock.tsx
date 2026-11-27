@@ -9,6 +9,7 @@ import {
   MicOff,
   Sparkles,
   Square,
+  Tablet,
   Volume2,
   VolumeX,
   X,
@@ -44,13 +45,57 @@ const TONE_STYLES: Record<AssistantReplyTone, { box: string; icon: string }> = {
 }
 
 const PRIMARY_BUTTON =
-  'inline-flex items-center justify-center gap-2 rounded-xl bg-brand-500 px-3.5 py-2 text-sm font-semibold text-ink-950 shadow-sm shadow-brand-500/30 ring-1 ring-brand-600/25 transition-colors hover:bg-brand-400 disabled:cursor-not-allowed disabled:opacity-60'
+  'inline-flex min-h-12 min-w-12 items-center justify-center gap-2 rounded-xl bg-brand-500 px-3.5 py-2 text-sm font-semibold text-ink-950 shadow-sm shadow-brand-500/30 ring-1 ring-brand-600/25 transition-colors hover:bg-brand-400 disabled:cursor-not-allowed disabled:opacity-60'
 
 const GHOST_BUTTON =
-  'inline-flex items-center justify-center gap-2 rounded-xl border border-slate-300 bg-white/85 px-3 py-2 text-sm font-medium text-slate-700 shadow-sm transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50'
+  'inline-flex min-h-12 min-w-12 items-center justify-center gap-2 rounded-xl border border-slate-300 bg-white/85 px-3 py-2 text-sm font-medium text-slate-700 shadow-sm transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50'
 
 const ICON_BUTTON =
-  'inline-flex items-center justify-center rounded-lg p-2 text-slate-500 transition-colors hover:bg-slate-100 hover:text-ink-900 disabled:cursor-not-allowed disabled:opacity-50'
+  'inline-flex min-h-12 min-w-12 items-center justify-center rounded-lg p-2 text-slate-500 transition-colors hover:bg-slate-100 hover:text-ink-900 disabled:cursor-not-allowed disabled:opacity-50'
+
+const SPEAKING_BUTTON =
+  'inline-flex min-h-12 min-w-12 items-center justify-center gap-2 rounded-xl bg-sky-600 px-3 py-2 text-sm font-semibold text-white shadow-sm shadow-sky-600/30 transition-colors hover:bg-sky-500 disabled:cursor-not-allowed disabled:opacity-60'
+
+type DockStatusProps = {
+  isListening: boolean
+  isSpeaking: boolean
+  isProcessing: boolean
+}
+
+/** Estado visible del copiloto: verde escucha, ámbar procesa, azul habla. */
+function DockStatus({ isListening, isSpeaking, isProcessing }: DockStatusProps) {
+  if (isSpeaking) {
+    return (
+      <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-sky-100 px-2 py-0.5 text-[10px] font-semibold text-sky-900 ring-1 ring-sky-300">
+        <Volume2 className="size-3" aria-hidden="true" />
+        Hablando
+      </span>
+    )
+  }
+
+  if (isProcessing) {
+    return (
+      <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold text-amber-900 ring-1 ring-amber-300">
+        <Loader2 className="size-3 animate-spin" aria-hidden="true" />
+        Procesando
+      </span>
+    )
+  }
+
+  if (isListening) {
+    return (
+      <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold text-emerald-900 ring-1 ring-emerald-300">
+        <span className="relative flex size-2" aria-hidden="true">
+          <span className="absolute inline-flex size-2 animate-ping rounded-full bg-emerald-500/70" />
+          <span className="relative inline-flex size-2 rounded-full bg-emerald-600" />
+        </span>
+        Escuchando
+      </span>
+    )
+  }
+
+  return null
+}
 
 type DockFabProps = {
   isListening: boolean
@@ -190,8 +235,9 @@ function ReplyBlock({ reply, onRepeat }: ReplyBlockProps) {
   if (!reply) {
     return (
       <p className="rounded-xl bg-white/70 px-3 py-2 text-xs leading-relaxed text-slate-500 ring-1 ring-slate-200">
-        Decí «llamar al siguiente», «leer alertas», «estado de cuenta», «agendá control» o «abrí
-        el odontograma de…». También podés escribirlo abajo.
+        Preguntá «¿cuántas citas hay hoy?», «¿cuánto sale una endodoncia?», «¿cómo va la caja?»
+        o pedí «llamar al siguiente», «abrí la ficha de…», «preparar cobro». También podés
+        escribirlo abajo.
       </p>
     )
   }
@@ -295,15 +341,20 @@ export function DoctorAssistantDock() {
     guidedCompleted,
     totalGuidedSteps,
     voiceFeedbackEnabled,
+    continuousMode,
+    silenceProgress,
     isSpeechSupported,
     isAiConfigured,
     closeDock,
     toggleDock,
     toggleListening,
+    interruptSpeech,
+    silenceSpeech,
     submitCommand,
     confirmPendingAction,
     cancelPendingAction,
     setVoiceFeedbackEnabled,
+    setContinuousMode,
     startGuidedWorkflow,
     advanceGuidedWorkflow,
     closeGuidedWorkflow,
@@ -378,12 +429,11 @@ export function DoctorAssistantDock() {
                 {activePatient ? getPatientFullName(activePatient) : 'Sin paciente activo'}
               </p>
             </div>
-            {isSpeaking && (
-              <span className="hidden items-center gap-1 rounded-full bg-brand-50 px-2 py-0.5 text-[10px] font-medium text-brand-800 ring-1 ring-brand-200 sm:inline-flex">
-                <Volume2 className="size-3" aria-hidden="true" />
-                Hablando
-              </span>
-            )}
+            <DockStatus
+              isListening={isListening}
+              isSpeaking={isSpeaking}
+              isProcessing={isProcessing}
+            />
             {isAiConfigured && (
               <span
                 title="Los comandos que el parser local no entiende se interpretan con Gemini Flash."
@@ -455,6 +505,27 @@ export function DoctorAssistantDock() {
                     <span className="italic text-slate-500">Hablá ahora: te escucho.</span>
                   )}
                 </p>
+
+                {isListening && silenceProgress > 0 && (
+                  <div className="mt-2">
+                    <div
+                      className="h-1.5 w-full overflow-hidden rounded-full bg-slate-200"
+                      role="progressbar"
+                      aria-label="Tiempo de silencio antes de enviar la orden"
+                      aria-valuemin={0}
+                      aria-valuemax={100}
+                      aria-valuenow={Math.round(Math.min(1, silenceProgress) * 100)}
+                    >
+                      <div
+                        className="h-full rounded-full bg-emerald-500 transition-[width] duration-100 ease-linear"
+                        style={{ width: `${Math.round(Math.min(1, silenceProgress) * 100)}%` }}
+                      />
+                    </div>
+                    <p className="mt-1 text-[10px] leading-relaxed text-slate-500">
+                      Enviando la orden tras 2 segundos de silencio. Decí «listo» para mandarla ya.
+                    </p>
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -487,7 +558,7 @@ export function DoctorAssistantDock() {
                 title={isListening ? 'Detener el micrófono' : 'Hablar con el copiloto (Alt + V)'}
                 className={
                   isListening
-                    ? 'inline-flex items-center justify-center gap-2 rounded-xl bg-red-50 px-3 py-2 text-sm font-medium text-red-700 shadow-sm ring-1 ring-red-200 transition-colors hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50'
+                    ? 'inline-flex min-h-12 min-w-12 items-center justify-center gap-2 rounded-xl bg-emerald-600 px-3 py-2 text-sm font-semibold text-white shadow-sm shadow-emerald-600/30 transition-colors hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-50'
                     : GHOST_BUTTON
                 }
               >
@@ -515,11 +586,39 @@ export function DoctorAssistantDock() {
                 {voiceFeedbackEnabled ? 'Voz on' : 'Voz off'}
               </button>
 
+              <button
+                type="button"
+                onClick={() => setContinuousMode(!continuousMode)}
+                aria-pressed={continuousMode}
+                title="Modo tablet continuo: al terminar de responder, el micrófono vuelve solo"
+                className={
+                  continuousMode
+                    ? 'inline-flex min-h-12 min-w-12 items-center justify-center gap-2 rounded-xl bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-800 ring-1 ring-emerald-300 transition-colors hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-50'
+                    : GHOST_BUTTON
+                }
+              >
+                <Tablet className="size-4" aria-hidden="true" />
+                {continuousMode ? 'Continuo on' : 'Continuo off'}
+              </button>
+
               <span className="ml-auto hidden items-center gap-1 text-[10px] text-slate-400 sm:inline-flex">
                 <MicOff className="size-3" aria-hidden="true" />
                 Alt + V
               </span>
             </div>
+
+            {isSpeaking && (
+              <div className="flex flex-wrap items-center gap-2">
+                <button type="button" onClick={silenceSpeech} className={SPEAKING_BUTTON}>
+                  <VolumeX className="size-4" aria-hidden="true" />
+                  Silenciar
+                </button>
+                <button type="button" onClick={interruptSpeech} className={GHOST_BUTTON}>
+                  <Mic className="size-4" aria-hidden="true" />
+                  Interrumpir y hablar
+                </button>
+              </div>
+            )}
 
             {!isSpeechSupported && (
               <p className="rounded-lg bg-amber-50 px-2.5 py-1.5 text-[11px] leading-relaxed text-amber-800 ring-1 ring-amber-200">
@@ -529,8 +628,9 @@ export function DoctorAssistantDock() {
             )}
 
             <p className="text-[10px] leading-relaxed text-slate-400">
-              Llamar a la sala, agendar un control y guardar en el odontograma piden confirmación
-              antes de tocar la base.
+              Llamar a la sala, agendar un control, guardar en el odontograma y enviar un
+              recordatorio por WhatsApp piden confirmación antes de tocar la base. Dictá con
+              pausas: la orden se envía tras 2 segundos de silencio o cuando decís «listo».
             </p>
           </form>
         </section>

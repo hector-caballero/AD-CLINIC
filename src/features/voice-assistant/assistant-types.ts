@@ -23,12 +23,49 @@ export type AssistantActionType =
   | 'schedule_followup'
   | 'prepare_collection_or_invoice'
   | 'guided_workflow'
+  | 'query_clinic_summary'
+  | 'query_appointments'
+  | 'query_patient_info'
+  | 'query_treatment_catalog'
+  | 'query_cash_summary'
+  | 'query_invoices_summary'
+  | 'query_team'
+  | 'send_whatsapp_reminder'
+  | 'lookup_ruc_dnit'
+  | 'navigate_to'
 
 export type AssistantOpenTarget = 'patients' | 'odontogram'
 
 export type AssistantDisposition = 'collection' | 'invoice'
 
 export type AssistantGuidedCommand = 'start' | 'next' | 'close'
+
+/**
+ * Sección del menú que puede abrir `navigate_to`.
+ * `/tv` no está en el menú pero es una pantalla real de la clínica.
+ */
+export type AssistantNavigationTarget =
+  | 'dashboard'
+  | 'patients'
+  | 'appointments'
+  | 'treatments'
+  | 'odontogram'
+  | 'cash'
+  | 'invoicing'
+  | 'team'
+  | 'tv'
+
+export const ASSISTANT_NAVIGATION_TARGETS: AssistantNavigationTarget[] = [
+  'dashboard',
+  'patients',
+  'appointments',
+  'treatments',
+  'odontogram',
+  'cash',
+  'invoicing',
+  'team',
+  'tv',
+]
 
 export const ASSISTANT_SURFACES: ToothSurface[] = [
   'occlusal',
@@ -80,6 +117,16 @@ export type AssistantIntent = {
   followup: AssistantFollowupDraft | null
   disposition: AssistantDisposition | null
   guidedCommand: AssistantGuidedCommand | null
+  /** Día consultado (`YYYY-MM-DD`); `null` = hoy. */
+  date: string | null
+  /** Procedimiento o categoría para buscar en el catálogo de tratamientos. */
+  treatmentQuery: string | null
+  /** Profesional mencionado para filtrar la agenda. */
+  staffQuery: string | null
+  /** Sección del menú que pide abrir `navigate_to`. */
+  navigationTarget: AssistantNavigationTarget | null
+  /** RUC (con dígito verificador) para consultar en Tu RUC. */
+  ruc: string | null
 }
 
 export type AssistantReplyTone = 'info' | 'success' | 'warning' | 'error'
@@ -223,14 +270,16 @@ export function isGuidedStepId(value: unknown): value is GuidedStepId {
 }
 
 /**
- * Acciones que modifican datos sensibles (llamados, citas, presupuesto/caja).
+ * Acciones que modifican datos sensibles (llamados, citas, presupuesto/caja) o
+ * que contactan al paciente por WhatsApp.
  * Se muestran como tarjeta de confirmación antes de tocar la base.
  */
 export function actionRequiresConfirmation(action: AssistantActionType): boolean {
   return (
     action === 'call_next_patient' ||
     action === 'odontogram_action' ||
-    action === 'schedule_followup'
+    action === 'schedule_followup' ||
+    action === 'send_whatsapp_reminder'
   )
 }
 
@@ -243,6 +292,8 @@ export function confirmationLabel(action: AssistantActionType): string {
       return 'Guardar en el plan'
     case 'schedule_followup':
       return 'Agendar control'
+    case 'send_whatsapp_reminder':
+      return 'Enviar recordatorio'
     default:
       return 'Confirmar'
   }

@@ -31,7 +31,13 @@ import {
   type AssistantPatientValue,
   type DoctorAssistantValue,
 } from './assistant-context'
-import { isAssistantSpeechSupported, speakAssistant, stopAssistantSpeech } from './assistant-speech'
+import {
+  ASSISTANT_SPEECH_RESUME_DELAY_MS,
+  isAssistantSpeaking,
+  isAssistantSpeechSupported,
+  speakAssistant,
+  stopAssistantSpeech,
+} from './assistant-speech'
 import {
   GUIDED_STEPS,
   actionRequiresConfirmation,
@@ -55,13 +61,34 @@ import {
  * activo sobreviven a la navegación entre módulos. Reglas:
  * - El dictado se crea recién al primer `Alt + V` o al abrir el micrófono: la
  *   Web Speech API pide permiso y no se debe pedir en cada pantalla.
- * - Mientras el asistente habla se corta el micrófono (evita que se escuche a sí
- *   mismo) y, si estaba escuchando, se retoma al terminar la locución.
+ * - Half-duplex anti-eco: antes de hablar se corta el micrófono y se retoma
+ *   `ASSISTANT_SPEECH_RESUME_DELAY_MS` (350 ms) después de `onend`. Con el
+ *   «modo tablet continuo» la escucha vuelve sola; sin él, solo si ya estaba
+ *   escuchando cuando el copiloto empezó a hablar.
+ * - El dictado acumula los tramos confirmados y envía el comando recién tras
+ *   `SILENCE_WINDOW_MS` (2 s) de silencio, o cuando el doctor termina con
+ *   «listo» / «ejecutar». `silenceProgress` alimenta la barra del dock.
  * - Nada se ejecuta sin pasar por `executeAssistantIntent`; las acciones
  *   sensibles quedan frenadas en `pendingConfirmation` hasta el «sí» del doctor.
  */
 
 const VOICE_STORAGE_KEY = 'ad-clinic:assistant-voice'
+
+/** «Modo tablet continuo»: el micrófono vuelve solo después de cada respuesta. */
+const CONTINUOUS_STORAGE_KEY = 'ad-clinic:assistant-continuous'
+
+/**
+ * Ventana de silencio del acumulador: el doctor puede pensar a mitad de la
+ * frase sin que el comando se envíe cortado.
+ */
+const SILENCE_WINDOW_MS = 2000
+
+/**
+ * Palabra final que fuerza el envío sin esperar los dos segundos:
+ * «…y listo», «…ejecutar».
+ */
+const FLUSH_KEYWORD =
+  /\b(listo|ejecutar|ejecuta|ejecutá|dale|termina|terminá|terminado)\b[\s.!?]*$/i
 
 const GENERIC_ERROR = 'No pude completar la acción. Revisá la conexión y volvé a intentar.'
 
@@ -74,6 +101,25 @@ function readVoicePreference(): boolean {
   } catch {
     return true
   }
+}
+
+/**
+ * Tablets del consultorio: por defecto el copiloto vuelve a escuchar después de
+ * cada respuesta. Solo se desactiva si el doctor lo apaga (se recuerda).
+ */
+function readContinuousPreference(): boolean {
+  if (typeof window === 'undefined') return true
+
+  try {
+    return window.localStorage.getItem(CONTINUOUS_STORAGE_KEY) !== 'off'
+  } catch {
+    return true
+  }
+}
+
+/** Quita «listo» / «ejecutar» del comando antes de interpretarlo. */
+function stripFlushKeyword(text: string): string {
+  return text.replace(FLUSH_KEYWORD, '').replace(/\s+/g, ' ').trim()
 }
 
 function errorMessage(error: unknown): string {
@@ -97,11 +143,15 @@ export function DoctorAssistantProvider({ children }: { children: ReactNode }) {
   const [guidedStepId, setGuidedStepId] = useState<GuidedStepId | null>(null)
   const [guidedCompleted, setGuidedCompleted] = useState<GuidedStepId[]>([])
   const [voiceFeedbackEnabled, setVoiceFeedbackState] = useState(readVoicePreference)
+  const [continuousMode, setContinuousModeState] = useState(readContinuousPreference)
+  const [silenceProgress, setSilenceProgress] = useState(0)
 
   const replyIdRef = useRef(0)
   const dictationRef = useRef<SpeechDictation | null>(null)
   const listeningRef = useRef(false)
   const voiceRef = useRef(voiceFeedbackEnabled)
+  const continuousRef = useRef(continuousMode)
+  const dockOpenRef = useRef(isDockOpen)
   const activePatientRef = useRef<Patient | null>(null)
   const guidedRef = useRef<GuidedStepId | null>(null)
   const confirmationRef = useRef<AssistantConfirmation | null>(null)
@@ -109,6 +159,14 @@ export function DoctorAssistantProvider({ children }: { children: ReactNode }) {
   const busyRef = useRef(false)
   const canEditRef = useRef(false)
   const dentistIdRef = useRef<string | null>(null)
+  /** Reactivación del micrófono programada después de `onend`. */
+  const resumeTimerRef = useRef<number | null>(null)
+  /** Inicio de la ventana de silencio del comando en curso. */
+  const silenceStartRef = useRef(0)
+  const silenceTickerRef = useRef<number | null>(null)
+  /** El dictado se crea una vez: guarda el submit vigente para no quedar viejo. */
+  const submitCommandRef = useRef<(text: string) => void>(() => {})
+  const beginDictationRef = useRef<() => boolean>(() => false)
 
   const canEditOdontogram = role === 'admin' || role === 'dentist'
   const dentistId = role === 'dentist' ? (profile?.id ?? null) : null
@@ -134,6 +192,14 @@ export function DoctorAssistantProvider({ children }: { children: ReactNode }) {
   }, [voiceFeedbackEnabled])
 
   useEffect(() => {
+    continuousRef.current = continuousMode
+  }, [continuousMode])
+
+  useEffect(() => {
+    dockOpenRef.current = isDockOpen
+  }, [isDockOpen])
+
+  useEffect(() => {
     canEditRef.current = canEditOdontogram
     dentistIdRef.current = dentistId
   }, [canEditOdontogram, dentistId])
@@ -148,36 +214,92 @@ export function DoctorAssistantProvider({ children }: { children: ReactNode }) {
     })
   }, [])
 
-  /**
-   * Lee una respuesta. Si el micrófono estaba activo se corta durante la
-   * locución (para no transcribir la propia voz) y se retoma al terminar.
-   * `force` saltea la preferencia de voz: «repetir» siempre se escucha.
-   */
-  const speak = useCallback((text: string, force = false) => {
-    if ((!force && !voiceRef.current) || !text.trim() || !isAssistantSpeechSupported()) return
+  const clearResumeTimer = useCallback(() => {
+    if (resumeTimerRef.current === null) return
 
-    const shouldResume = listeningRef.current
+    window.clearTimeout(resumeTimerRef.current)
+    resumeTimerRef.current = null
+  }, [])
 
-    if (shouldResume) {
-      listeningRef.current = false
-      dictationRef.current?.stop()
-      setIsListening(false)
+  const stopSilenceTicker = useCallback(() => {
+    if (silenceTickerRef.current !== null) {
+      window.clearInterval(silenceTickerRef.current)
+      silenceTickerRef.current = null
     }
 
-    const started = speakAssistant(text, {
-      onStart: () => setIsSpeaking(true),
-      onEnd: () => {
-        setIsSpeaking(false)
-
-        if (shouldResume && dictationRef.current) {
-          listeningRef.current = true
-          dictationRef.current.start()
-        }
-      },
-    })
-
-    if (!started) setIsSpeaking(false)
+    silenceStartRef.current = 0
+    setSilenceProgress(0)
   }, [])
+
+  /** Reinicia la barra de 2 s en cada palabra detectada por el dictado. */
+  const noteVoiceActivity = useCallback(() => {
+    silenceStartRef.current = Date.now()
+
+    if (silenceTickerRef.current !== null) return
+
+    silenceTickerRef.current = window.setInterval(() => {
+      const startedAt = silenceStartRef.current
+
+      if (!startedAt || !listeningRef.current) return
+
+      const progress = Math.min(1, (Date.now() - startedAt) / SILENCE_WINDOW_MS)
+
+      setSilenceProgress(progress)
+
+      // La barra llegó al final: el dictado está por entregar la frase.
+      if (progress >= 1 && silenceTickerRef.current !== null) {
+        window.clearInterval(silenceTickerRef.current)
+        silenceTickerRef.current = null
+      }
+    }, 100)
+  }, [])
+
+  /**
+   * Lee una respuesta con half-duplex estricto: corta el micrófono antes de
+   * hablar y lo retoma 350 ms después de `onend` (o de inmediato si el doctor
+   * usó «Interrumpir y hablar»). `force` saltea la preferencia de voz: «repetir»
+   * siempre se escucha.
+   */
+  const speak = useCallback(
+    (text: string, force = false) => {
+      if ((!force && !voiceRef.current) || !text.trim() || !isAssistantSpeechSupported()) return
+
+      const shouldResume = listeningRef.current || continuousRef.current
+
+      if (listeningRef.current) {
+        listeningRef.current = false
+        dictationRef.current?.stop()
+        setIsListening(false)
+      }
+
+      clearResumeTimer()
+      stopSilenceTicker()
+      setIsSpeaking(true)
+
+      const started = speakAssistant(text, {
+        onStart: () => setIsSpeaking(true),
+        onEnd: () => {
+          setIsSpeaking(false)
+
+          if (!shouldResume) return
+
+          clearResumeTimer()
+          resumeTimerRef.current = window.setTimeout(() => {
+            resumeTimerRef.current = null
+
+            // El doctor ya prendió el micrófono, cerró el panel o el motor sigue
+            // hablando: no se duplica la escucha.
+            if (!dockOpenRef.current || listeningRef.current || isAssistantSpeaking()) return
+
+            beginDictationRef.current()
+          }, ASSISTANT_SPEECH_RESUME_DELAY_MS)
+        },
+      })
+
+      if (!started) setIsSpeaking(false)
+    },
+    [clearResumeTimer, stopSilenceTicker],
+  )
 
   const pushReply = useCallback(
     (
@@ -443,6 +565,13 @@ export function DoctorAssistantProvider({ children }: { children: ReactNode }) {
     [handleGuidedCommand, location.pathname, pushReply, runIntent],
   )
 
+  // El dictado se crea una sola vez: siempre ejecuta el submit del render actual.
+  useEffect(() => {
+    submitCommandRef.current = (text: string) => {
+      void submitCommand(text)
+    }
+  }, [submitCommand])
+
   const confirmPendingAction = useCallback(async () => {
     const pending = confirmationRef.current
 
@@ -471,25 +600,75 @@ export function DoctorAssistantProvider({ children }: { children: ReactNode }) {
   const ensureDictation = useCallback(() => {
     if (dictationRef.current) return dictationRef.current
 
-    const dictation = createSpeechDictation({
-      onTranscript: (_final, interim) => setInterimTranscript(interim),
-      onPhrase: (phrase) => {
-        setInterimTranscript('')
-        void submitCommand(phrase)
+    const dictation = createSpeechDictation(
+      {
+        onTranscript: (final, interim) => {
+          setInterimTranscript(interim)
+
+          const combined = `${final} ${interim}`.replace(/\s+/g, ' ').trim()
+
+          if (!combined) return
+
+          noteVoiceActivity()
+
+          // «…listo» / «…ejecutar»: no se espera la ventana de silencio.
+          if (FLUSH_KEYWORD.test(combined)) dictationRef.current?.flush()
+        },
+        onPhrase: (phrase) => {
+          stopSilenceTicker()
+          setInterimTranscript('')
+
+          const command = stripFlushKeyword(phrase)
+
+          if (!command) return
+
+          submitCommandRef.current(command)
+        },
+        onError: (message) => {
+          // Un error del micrófono no debe reabrir la escucha al terminar de hablar.
+          listeningRef.current = false
+          setIsListening(false)
+          clearResumeTimer()
+          stopSilenceTicker()
+          pushReply('error', message)
+        },
+        onStateChange: (state) => {
+          setIsListening(state === 'listening')
+
+          if (state === 'idle' && !listeningRef.current) stopSilenceTicker()
+        },
       },
-      onError: (message) => {
-        // Un error del micrófono no debe reabrir la escucha al terminar de hablar.
-        listeningRef.current = false
-        setIsListening(false)
-        pushReply('error', message)
-      },
-      onStateChange: (state) => setIsListening(state === 'listening'),
-    })
+      { silenceMs: SILENCE_WINDOW_MS },
+    )
 
     dictationRef.current = dictation
 
     return dictation
-  }, [pushReply, submitCommand])
+  }, [clearResumeTimer, noteVoiceActivity, pushReply, stopSilenceTicker])
+
+  /** Prende el micrófono sin mensajes (lo usan la reactivación y el atajo). */
+  const beginDictation = useCallback(() => {
+    if (!isSpeechDictationSupported()) return false
+
+    try {
+      const dictation = ensureDictation()
+
+      listeningRef.current = true
+      dictation.start()
+      setIsListening(true)
+
+      return true
+    } catch {
+      listeningRef.current = false
+      setIsListening(false)
+
+      return false
+    }
+  }, [ensureDictation])
+
+  useEffect(() => {
+    beginDictationRef.current = beginDictation
+  }, [beginDictation])
 
   const startListening = useCallback(() => {
     if (!isSpeechDictationSupported()) {
@@ -498,6 +677,7 @@ export function DoctorAssistantProvider({ children }: { children: ReactNode }) {
       return
     }
 
+    clearResumeTimer()
     stopAssistantSpeech()
     setIsSpeaking(false)
     setIsDockOpen(true)
@@ -513,14 +693,33 @@ export function DoctorAssistantProvider({ children }: { children: ReactNode }) {
       setIsListening(false)
       pushReply('error', errorMessage(error))
     }
-  }, [ensureDictation, pushReply])
+  }, [clearResumeTimer, ensureDictation, pushReply])
+
+  /** «Interrumpir y hablar»: corta la voz del copiloto y abre el micrófono. */
+  const interruptSpeech = useCallback(() => {
+    clearResumeTimer()
+    stopAssistantSpeech()
+    setIsSpeaking(false)
+    setIsDockOpen(true)
+
+    if (!beginDictation()) pushReply('error', GENERIC_ERROR)
+  }, [beginDictation, clearResumeTimer, pushReply])
+
+  /** «Silenciar»: corta la locución y deja la preferencia de voz como estaba. */
+  const silenceSpeech = useCallback(() => {
+    clearResumeTimer()
+    stopAssistantSpeech()
+    setIsSpeaking(false)
+  }, [clearResumeTimer])
 
   const stopListening = useCallback(() => {
+    clearResumeTimer()
     listeningRef.current = false
     dictationRef.current?.stop()
     setIsListening(false)
     setInterimTranscript('')
-  }, [])
+    stopSilenceTicker()
+  }, [clearResumeTimer, stopSilenceTicker])
 
   const toggleListening = useCallback(() => {
     if (listeningRef.current) stopListening()
@@ -530,12 +729,14 @@ export function DoctorAssistantProvider({ children }: { children: ReactNode }) {
   const openDock = useCallback(() => setIsDockOpen(true), [])
 
   const closeDock = useCallback(() => {
+    clearResumeTimer()
+    stopSilenceTicker()
     setIsDockOpen(false)
     listeningRef.current = false
     dictationRef.current?.stop()
     setIsListening(false)
     setInterimTranscript('')
-  }, [])
+  }, [clearResumeTimer, stopSilenceTicker])
 
   const toggleDock = useCallback(() => {
     setIsDockOpen((open) => !open)
@@ -556,6 +757,22 @@ export function DoctorAssistantProvider({ children }: { children: ReactNode }) {
       // Modo privado sin `localStorage`: la preferencia dura la sesión.
     }
   }, [])
+
+  const setContinuousMode = useCallback(
+    (enabled: boolean) => {
+      continuousRef.current = enabled
+      setContinuousModeState(enabled)
+
+      if (!enabled) clearResumeTimer()
+
+      try {
+        window.localStorage.setItem(CONTINUOUS_STORAGE_KEY, enabled ? 'on' : 'off')
+      } catch {
+        // Modo privado sin `localStorage`: la preferencia dura la sesión.
+      }
+    },
+    [clearResumeTimer],
+  )
 
   const repeatReply = useCallback(() => {
     const reply = replyRef.current
@@ -638,6 +855,9 @@ export function DoctorAssistantProvider({ children }: { children: ReactNode }) {
       dictationRef.current?.dispose()
       dictationRef.current = null
       stopAssistantSpeech()
+
+      if (resumeTimerRef.current !== null) window.clearTimeout(resumeTimerRef.current)
+      if (silenceTickerRef.current !== null) window.clearInterval(silenceTickerRef.current)
     }
   }, [])
 
@@ -665,6 +885,8 @@ export function DoctorAssistantProvider({ children }: { children: ReactNode }) {
       guidedCompleted,
       totalGuidedSteps: GUIDED_STEPS.length,
       voiceFeedbackEnabled,
+      continuousMode,
+      silenceProgress,
       isSpeechSupported: isSpeechDictationSupported(),
       isAiConfigured: isGeminiConfigured(),
       openDock,
@@ -673,6 +895,8 @@ export function DoctorAssistantProvider({ children }: { children: ReactNode }) {
       startListening,
       stopListening,
       toggleListening,
+      interruptSpeech,
+      silenceSpeech,
       submitCommand: (text: string) => {
         void submitCommand(text)
       },
@@ -681,6 +905,7 @@ export function DoctorAssistantProvider({ children }: { children: ReactNode }) {
       },
       cancelPendingAction,
       setVoiceFeedbackEnabled,
+      setContinuousMode,
       startGuidedWorkflow,
       advanceGuidedWorkflow,
       closeGuidedWorkflow,
@@ -696,11 +921,13 @@ export function DoctorAssistantProvider({ children }: { children: ReactNode }) {
       closeDock,
       closeGuidedWorkflow,
       confirmPendingAction,
+      continuousMode,
       finishGuidedConsultation,
       guidedCompleted,
       guidedStep,
       guidedStepId,
       interimTranscript,
+      interruptSpeech,
       isDockOpen,
       isListening,
       isProcessing,
@@ -710,7 +937,10 @@ export function DoctorAssistantProvider({ children }: { children: ReactNode }) {
       repeatReply,
       runGuidedStep,
       setActivePatient,
+      setContinuousMode,
       setVoiceFeedbackEnabled,
+      silenceProgress,
+      silenceSpeech,
       startGuidedWorkflow,
       startListening,
       stopListening,
